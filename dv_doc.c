@@ -45,6 +45,21 @@ static unsigned int read32(FILE *f)
 	return x;
 }
 
+static unsigned int read24(FILE *f)
+{
+	unsigned int x = getc(f) << 16;
+	x |= getc(f) << 8;
+	x |= getc(f);
+	return x;
+}
+
+static unsigned int read16(FILE *f)
+{
+	unsigned int x = getc(f) << 8;
+	x |= getc(f);
+	return x;
+}
+
 static int pad16(int n)
 {
 	return (n + 1) & ~1;
@@ -55,16 +70,65 @@ static int pad32(int n)
 	return (n + 3) & ~3;
 }
 
+static unsigned int get32(unsigned char *p)
+{
+	return p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static unsigned int get24(unsigned char *p)
+{
+	return p[0] << 16 | p[1] << 8 | p[2];
+}
+
+static unsigned int get16(unsigned char *p)
+{
+	return p[0] << 8 | p[1];
+}
+
 void
 dv_parse_dirm(struct dv_document *doc, unsigned char *data, unsigned int len)
 {
-	printf("parse DIRM tag\n");
+	unsigned int flags, count, offset, i;
+	printf("DIRM {\n");
+	flags = data[0];
+	count = get16(data + 1);
+	if (flags & (1 << 7)) {
+		printf("bundled\n");
+		for (i = 0; i < count; i++) {
+			offset = get16(data + 3 + i * 4);
+			printf("offset %d\n", offset);
+		}
+		offset = 3 + count * 4;
+		dv_decode_bzz(data + offset, len - offset);
+	} else {
+		printf("indirect\n");
+		dv_decode_bzz(data + 3, len - 3);
+	}
+	printf("}\n");
 }
 
 void
 dv_parse_navm(struct dv_document *doc, unsigned char *data, unsigned int len)
 {
-	printf("parse NAVM tag\n");
+	printf("NAVM {\n");
+	dv_decode_bzz(data, len);
+	printf("}");
+}
+
+void
+dv_parse_antz(struct dv_document *doc, unsigned char *data, unsigned int len)
+{
+	printf("ANTz {\n");
+	dv_decode_bzz(data, len);
+	printf("}");
+}
+
+void
+dv_parse_txtz(struct dv_document *doc, unsigned char *data, unsigned int len)
+{
+	printf("TXTz {\n");
+	dv_decode_bzz(data, len);
+	printf("}");
 }
 
 int
@@ -77,6 +141,10 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, unsigned int len)
 		dv_parse_dirm(doc, data, len);
 	else if (tag == TAG('N','A','V','M'))
 		dv_parse_navm(doc, data, len);
+	else if (tag == TAG('A','N','T','z'))
+		dv_parse_antz(doc, data, len);
+	else if (tag == TAG('T','X','T','z'))
+		dv_parse_txtz(doc, data, len);
 	else
 		printf("tag %c%c%c%c\n", tag>>24, tag>>16, tag>>8, tag);
 	free(data);
