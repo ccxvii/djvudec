@@ -424,10 +424,3 @@ zp_decode_pass_through(struct zp *zp)
 	return zp_decode_imp_simple(zp, 0, 0x8000 + (zp->a >> 1));
 }
 
-int
-dv_decode_zp(unsigned char *data, unsigned int len)
-{
-	struct zp zp;
-	zp_init(&zp, data, len);
-}
-

@@ -21,7 +21,7 @@ static inline unsigned int decode_bin(struct zp *zp, unsigned char *ctx, int b)
 
 static int
 dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
-	unsigned char *input, int len)
+	unsigned char **out, int *outlen)
 {
 	unsigned char mtf[256];
 	int count[256];
@@ -176,7 +176,9 @@ dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
 	if (k != markerpos)
 		goto error;
 
-	free(data);
+	*out = data;
+	*outlen = blocksize - 1;
+
 	free(posc);
 	free(posn);
 	return 0;
@@ -189,13 +191,11 @@ error:
 }
 
 int
-dv_decode_bzz(unsigned char *input, int len)
+dv_decode_bzz(unsigned char **out, int *outlen, unsigned char *src, int srclen)
 {
 	struct zp zp;
 	unsigned char ctx[260];
-
-	zp_init(&zp, input, len);
+	zp_init(&zp, src, srclen);
 	memset(ctx, 0, sizeof ctx);
-
-	return dv_decode_bzz_block(&zp, ctx, input, len);
+	return dv_decode_bzz_block(&zp, ctx, out, outlen);
 }

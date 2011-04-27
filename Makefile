@@ -4,6 +4,8 @@ build ?= debug
 
 OUT := build/$(build)
 
+CFLAGS += -Wall -g
+
 default: all
 
 ifeq "$(verbose)" ""
@@ -29,4 +31,10 @@ $(APP) : $(addprefix $(OUT)/, $(SRC:%.c=%.o))
 	$(LINK_CMD)
 
 all: $(APP)
+
+clean:
+	rm $(OUT)/*
+
+nuke:
+	rm -rf build
 

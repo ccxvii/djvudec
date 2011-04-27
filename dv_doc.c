@@ -36,26 +36,26 @@ fz_catch(int code, char *msg)
 	fprintf(stderr, "\\ %s\n", msg);
 }
 
-static unsigned int read32(FILE *f)
+static int read32(FILE *f)
 {
-	unsigned int x = getc(f) << 24;
+	int x = getc(f) << 24;
 	x |= getc(f) << 16;
 	x |= getc(f) << 8;
 	x |= getc(f);
 	return x;
 }
 
-static unsigned int read24(FILE *f)
+static int read24(FILE *f)
 {
-	unsigned int x = getc(f) << 16;
+	int x = getc(f) << 16;
 	x |= getc(f) << 8;
 	x |= getc(f);
 	return x;
 }
 
-static unsigned int read16(FILE *f)
+static int read16(FILE *f)
 {
-	unsigned int x = getc(f) << 8;
+	int x = getc(f) << 8;
 	x |= getc(f);
 	return x;
 }
@@ -70,69 +70,126 @@ static int pad32(int n)
 	return (n + 3) & ~3;
 }
 
-static unsigned int get32(unsigned char *p)
+static int get32(unsigned char *p)
 {
 	return p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
 
-static unsigned int get24(unsigned char *p)
+static int get24(unsigned char *p)
 {
 	return p[0] << 16 | p[1] << 8 | p[2];
 }
 
-static unsigned int get16(unsigned char *p)
+static int get16(unsigned char *p)
 {
 	return p[0] << 8 | p[1];
 }
 
 void
-dv_parse_dirm(struct dv_document *doc, unsigned char *data, unsigned int len)
+dv_parse_dirm(struct dv_document *doc, unsigned char *cdata, int csize)
 {
-	unsigned int flags, count, offset, i;
+	int flags, count, offset, size, flag, i;
+	int hasname, hastitle;
+	unsigned char *udata;
+	int usize;
+
 	printf("DIRM {\n");
-	flags = data[0];
-	count = get16(data + 1);
+	flags = cdata[0];
+	count = get16(cdata + 1);
+
 	if (flags & (1 << 7)) {
 		printf("bundled\n");
 		for (i = 0; i < count; i++) {
-			offset = get16(data + 3 + i * 4);
-			printf("offset %d\n", offset);
+			offset = get32(cdata + 3 + i * 4);
+			printf("offset %d = %d\n", i, offset);
 		}
 		offset = 3 + count * 4;
-		dv_decode_bzz(data + offset, len - offset);
+		dv_decode_bzz(&udata, &usize, cdata + offset, csize - offset);
 	} else {
 		printf("indirect\n");
-		dv_decode_bzz(data + 3, len - 3);
+		dv_decode_bzz(&udata, &usize, cdata + 3, csize - 3);
 	}
+
+	offset = count * 4;
+	for (i = 0; i < count; i++) {
+		size = get24(udata + i * 3);
+		flag = udata[count * 3 + i];
+		printf("chunk %d: size=%d flag=%x name='%s'\n", i, size, flag, udata + offset);
+		offset += strlen(udata + offset) + 1;
+		if (flag & 0x80) offset += strlen(udata + offset) + 1;
+		if (flag & 0x40) offset += strlen(udata + offset) + 1;
+	}
+
+	free(udata);
+
 	printf("}\n");
 }
 
 void
-dv_parse_navm(struct dv_document *doc, unsigned char *data, unsigned int len)
+dv_parse_navm(struct dv_document *doc, unsigned char *cdata, int csize)
 {
+	unsigned char *udata;
+	int usize;
 	printf("NAVM {\n");
-	dv_decode_bzz(data, len);
-	printf("}");
+	dv_decode_bzz(&udata, &usize, cdata, csize);
+	fwrite(udata, 1, usize, stdout);
+	free(udata);
+	printf("\n}\n");
 }
 
 void
-dv_parse_antz(struct dv_document *doc, unsigned char *data, unsigned int len)
+dv_parse_antz(struct dv_document *doc, unsigned char *cdata, int csize)
 {
+	unsigned char *udata;
+	int usize;
 	printf("ANTz {\n");
-	dv_decode_bzz(data, len);
-	printf("}");
+	dv_decode_bzz(&udata, &usize, cdata, csize);
+	fwrite(udata, 1, usize, stdout);
+	free(udata);
+	printf("\n}\n");
 }
 
 void
-dv_parse_txtz(struct dv_document *doc, unsigned char *data, unsigned int len)
+dv_parse_txtz(struct dv_document *doc, unsigned char *cdata, int csize)
 {
+	unsigned char *udata;
+	int usize;
 	printf("TXTz {\n");
-	dv_decode_bzz(data, len);
-	printf("}");
+	dv_decode_bzz(&udata, &usize, cdata, csize);
+	fwrite(udata, 1, usize, stdout);
+	free(udata);
+	printf("\n}\n");
 }
 
-int
-dv_read_chunk(struct dv_document *doc, unsigned int tag, unsigned int len)
+void
+dv_parse_info(struct dv_document *doc, unsigned char *data, int size)
+{
+	int w, h, min, maj, dpi, gamma, flags;
+	w = get16(data);
+	h = get16(data + 2);
+	min = data[4];
+	maj = data[5];
+	dpi = data[6] | data[7] << 8; /* wtf, little endian here!? */
+	gamma = data[8];
+	flags = data[9];
+	printf("INFO {\n");
+	printf("\t%d x %d\n", w, h);
+	printf("\t%d dpi\n", dpi);
+	printf("\t%d.%d gamma\n", gamma/10, gamma%10);
+	printf("\t%d rotation\n", flags);
+	printf("}\n");
+}
+
+void
+dv_parse_incl(struct dv_document *doc, unsigned char *data, int size)
+{
+	printf("INCL '");
+	fwrite(data, 1, size, stdout);
+	printf("'\n");
+}
+
+void
+dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 {
 	unsigned char *data = malloc(len);
 	fread(data, 1, len, doc->file);
@@ -145,15 +202,19 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, unsigned int len)
 		dv_parse_antz(doc, data, len);
 	else if (tag == TAG('T','X','T','z'))
 		dv_parse_txtz(doc, data, len);
+	else if (tag == TAG('I','N','F','O'))
+		dv_parse_info(doc, data, len);
+	else if (tag == TAG('I','N','C','L'))
+		dv_parse_incl(doc, data, len);
 	else
 		printf("tag %c%c%c%c\n", tag>>24, tag>>16, tag>>8, tag);
 	free(data);
 }
 
 int
-dv_read_form(struct dv_document *doc, unsigned int tag, unsigned int form_len)
+dv_read_form(struct dv_document *doc, int tag, int form_len)
 {
-	unsigned int len, ofs = 4;
+	int len, ofs = 4;
 	printf("FORM:%c%c%c%c {\n", tag>>24, tag>>16, tag>>8, tag);
 	while (ofs < form_len) {
 		tag = read32(doc->file);
@@ -173,7 +234,7 @@ dv_read_form(struct dv_document *doc, unsigned int tag, unsigned int form_len)
 int
 dv_read_iff(struct dv_document *doc)
 {
-	unsigned int att, tag, len;
+	int att, tag, len;
 
 	att = read32(doc->file);
 	tag = read32(doc->file);

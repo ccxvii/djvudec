@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int dv_decode_bzz(unsigned char *data, unsigned int len);
-
 struct zp {
 	unsigned int a, c, fence, buffer, avail;
 	unsigned char *rp, *ep;
@@ -17,6 +15,8 @@ struct zp {
 void zp_init(struct zp *zp, unsigned char *data, int len);
 int zp_decode(struct zp *zp, unsigned char *ctx);
 int zp_decode_pass_through(struct zp *zp);
+
+int dv_decode_bzz(unsigned char **out, int *outlen, unsigned char *src, int srclen);
 
 struct dv_document
 {
