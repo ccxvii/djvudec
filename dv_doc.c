@@ -191,6 +191,14 @@ dv_parse_incl(struct dv_document *doc, unsigned char *data, int size)
 }
 
 void
+dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
+{
+	printf("Sjbz {\n");
+	jb2_decode(data, size);
+	printf("}\n");
+}
+
+void
 dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 {
 	unsigned char *data = malloc(len);
@@ -208,6 +216,8 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 		dv_parse_info(doc, data, len);
 	else if (tag == TAG('I','N','C','L'))
 		dv_parse_incl(doc, data, len);
+	else if (tag == TAG('S','j','b','z'))
+		dv_parse_sjbz(doc, data, len);
 	else
 		printf("tag %c%c%c%c\n", tag>>24, tag>>16, tag>>8, tag);
 	free(data);
