@@ -104,11 +104,13 @@ dv_parse_dirm(struct dv_document *doc, unsigned char *cdata, int csize)
 			printf("offset %d = %d\n", i, offset);
 		}
 		offset = 3 + count * 4;
-		dv_decode_bzz(&udata, &usize, cdata + offset, csize - offset);
+		udata = bzz_decode(cdata + offset, csize - offset, &usize);
 	} else {
 		printf("indirect\n");
-		dv_decode_bzz(&udata, &usize, cdata + 3, csize - 3);
+		udata = bzz_decode(cdata + 3, csize - 3, &usize);
 	}
+
+	if (!udata) { printf("bzz decode error\n}\n"); return; }
 
 	offset = count * 4;
 	for (i = 0; i < count; i++) {
@@ -131,8 +133,8 @@ dv_parse_navm(struct dv_document *doc, unsigned char *cdata, int csize)
 	unsigned char *udata;
 	int usize;
 	printf("NAVM {\n");
-	dv_decode_bzz(&udata, &usize, cdata, csize);
-	fwrite(udata, 1, usize, stdout);
+	udata = bzz_decode(cdata, csize, &usize);
+	if (udata) fwrite(udata, 1, usize, stdout);
 	free(udata);
 	printf("\n}\n");
 }
@@ -143,8 +145,8 @@ dv_parse_antz(struct dv_document *doc, unsigned char *cdata, int csize)
 	unsigned char *udata;
 	int usize;
 	printf("ANTz {\n");
-	dv_decode_bzz(&udata, &usize, cdata, csize);
-	fwrite(udata, 1, usize, stdout);
+	udata = bzz_decode(cdata, csize, &usize);
+	if (udata) fwrite(udata, 1, usize, stdout);
 	free(udata);
 	printf("\n}\n");
 }
@@ -155,8 +157,8 @@ dv_parse_txtz(struct dv_document *doc, unsigned char *cdata, int csize)
 	unsigned char *udata;
 	int usize;
 	printf("TXTz {\n");
-	dv_decode_bzz(&udata, &usize, cdata, csize);
-	fwrite(udata, 1, usize, stdout);
+	udata = bzz_decode(cdata, csize, &usize);
+	if (udata) fwrite(udata, 1, usize, stdout);
 	free(udata);
 	printf("\n}\n");
 }

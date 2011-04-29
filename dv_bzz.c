@@ -1,6 +1,7 @@
 #include "mudjvu.h"
 
-static inline unsigned int decode_raw(struct zp *zp, int b)
+static unsigned int
+bzz_decode_raw(struct zp_decoder *zp, int b)
 {
 	int n = 1;
 	int m = 1 << b;
@@ -9,7 +10,8 @@ static inline unsigned int decode_raw(struct zp *zp, int b)
 	return n - m;
 }
 
-static inline unsigned int decode_bin(struct zp *zp, unsigned char *ctx, int b)
+static unsigned int
+bzz_decode_bin(struct zp_decoder *zp, unsigned char *ctx, int b)
 {
 	int n = 1;
 	int m = 1 << b;
@@ -19,9 +21,8 @@ static inline unsigned int decode_bin(struct zp *zp, unsigned char *ctx, int b)
 	return n - m;
 }
 
-static int
-dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
-	unsigned char **out, int *outlen)
+static unsigned char *
+bzz_decode_block(struct zp_decoder *zp, unsigned char *ctx, int *outlen)
 {
 	unsigned char mtf[256];
 	int count[256];
@@ -36,10 +37,15 @@ dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
 	unsigned char *posc;
 	int *posn;
 
+	*outlen = 0;
+
 	/* phase 1: arithmetic decoding */
 
 	/* decode block size */
-	blocksize = decode_raw(zp, 24);
+	blocksize = bzz_decode_raw(zp, 24);
+
+	if (blocksize == 0 || blocksize > 4096 * 1024)
+		return NULL;
 
 	data = malloc(blocksize);
 	posc = malloc(blocksize);
@@ -49,11 +55,12 @@ dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
 
 	/* decode estimation speed */
 	fshift = 0;
-	if (zp_decode_pass_through(zp))
+	if (zp_decode_pass_through(zp)) {
 		if (zp_decode_pass_through(zp))
 			fshift = 2;
 		else
 			fshift = 1;
+	}
 
 	/* fill mtf array */
 	for (i = 0; i < 256; i++)
@@ -81,25 +88,25 @@ dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
 			mtfno = 1;
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 6)) {
-			mtfno = 2 + decode_bin(zp, ctx + 7, 1);
+			mtfno = 2 + bzz_decode_bin(zp, ctx + 7, 1);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 8)) {
-			mtfno = 4 + decode_bin(zp, ctx + 9, 2);
+			mtfno = 4 + bzz_decode_bin(zp, ctx + 9, 2);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 12)) {
-			mtfno = 8 + decode_bin(zp, ctx + 13, 3);
+			mtfno = 8 + bzz_decode_bin(zp, ctx + 13, 3);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 20)) {
-			mtfno = 16 + decode_bin(zp, ctx + 21, 4);
+			mtfno = 16 + bzz_decode_bin(zp, ctx + 21, 4);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 36)) {
-			mtfno = 32 + decode_bin(zp, ctx + 37, 5);
+			mtfno = 32 + bzz_decode_bin(zp, ctx + 37, 5);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 68)) {
-			mtfno = 64 + decode_bin(zp, ctx + 69, 6);
+			mtfno = 64 + bzz_decode_bin(zp, ctx + 69, 6);
 			data[i] = mtf[mtfno];
 		} else if (zp_decode(zp, ctx + 132)) {
-			mtfno = 128 + decode_bin(zp, ctx + 133, 7);
+			mtfno = 128 + bzz_decode_bin(zp, ctx + 133, 7);
 			data[i] = mtf[mtfno];
 		} else {
 			mtfno = 256; /* EOB symbol */
@@ -176,26 +183,25 @@ dv_decode_bzz_block(struct zp *zp, unsigned char *ctx,
 	if (k != markerpos)
 		goto error;
 
-	*out = data;
 	*outlen = blocksize - 1;
 
 	free(posc);
 	free(posn);
-	return 0;
+	return data;
 
 error:
-	free(data);
 	free(posc);
 	free(posn);
-	return fz_throw("bzz decoding error");
+	free(data);
+	return NULL;
 }
 
-int
-dv_decode_bzz(unsigned char **out, int *outlen, unsigned char *src, int srclen)
+unsigned char *
+bzz_decode(unsigned char *src, int srclen, int *outlen)
 {
-	struct zp zp;
+	struct zp_decoder zp;
 	unsigned char ctx[260];
 	zp_init(&zp, src, srclen);
 	memset(ctx, 0, sizeof ctx);
-	return dv_decode_bzz_block(&zp, ctx, out, outlen);
+	return bzz_decode_block(&zp, ctx, outlen);
 }

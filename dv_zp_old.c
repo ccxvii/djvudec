@@ -1,15 +1,6 @@
 #include "mudjvu.h"
 
-/*
-	The Z'-Coder is an approximate binary arithmetic coder.
-
-	The Z'-Coder as listed in the DjVu spec is incomplete.
-	The implemented Z'-Coder uses a fence, like the Z-Coder.
-	Comparisons in the spec are often wrong, saying > where
-	the implementation uses >=.
-
-	The calculation of Z for the pass-through case is also different.
-*/
+/* The Z'-Coder is an approximate binary arithmetic coder. */
 
 static const unsigned short zp_tab_p[256] = {
 	0x8000, 0x8000, 0x8000, 0x6bbd, 0x6bbd, 0x5d45, 0x5d45, 0x51b9,
@@ -100,6 +91,22 @@ static const unsigned char zp_tab_dn[256] = {
 	21, 16, 15, 8, 241, 242, 7, 10, 245, 2, 1, 83, 250, 2, 143, 246,
 };
 
+static const char ffzt[256] = {
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+	2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+	3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 4,4,4,4,4,4,4,4,5,5,5,5,6,6,7,8,
+};
+
+static inline int ffz(unsigned int x)
+{
+	return x >= 0xff00 ? ffzt[x&0xff] + 8 : ffzt[(x>>8)&0xff];
+}
+
 static inline unsigned int zp_read_byte(struct zp_decoder *zp)
 {
 	if (zp->rp < zp->ep)
@@ -107,16 +114,12 @@ static inline unsigned int zp_read_byte(struct zp_decoder *zp)
 	return 0xff;
 }
 
-static inline int zp_read_bit(struct zp_decoder *zp)
+static inline void zp_preload(struct zp_decoder *zp)
 {
-	int b;
-	zp->avail--;
-	b = (zp->buffer >> zp->avail) & 1;
-	if (zp->avail == 0) {
-		zp->buffer = zp_read_byte(zp);
-		zp->avail = 8;
+	while (zp->avail <= 24) {
+		zp->buffer = zp->buffer << 8 | zp_read_byte(zp);
+		zp->avail += 8;
 	}
-	return b;
 }
 
 void
@@ -129,78 +132,129 @@ zp_init(struct zp_decoder *zp, unsigned char *data, int len)
 	zp->c = zp_read_byte(zp) << 8;
 	zp->c |= zp_read_byte(zp);
 
-	zp->buffer = zp_read_byte(zp);
-	zp->avail = 8;
+	zp->buffer = 0;
+	zp->avail = 0;
+	zp_preload(zp);
 
 	zp->f = zp->c;
-	if (zp->f > 0x7fff)
+	if (zp->c > 0x7fff)
 		zp->f = 0x7fff;
+}
+
+int
+zp_decode_imp(struct zp_decoder *zp, unsigned char *ctx, unsigned int z)
+{
+	int shift;
+	int bit = *ctx & 1;
+	unsigned int d = 0x6000 + ((z + zp->a) >> 2);
+	if (z > d)
+		z = d;
+	if (z > zp->c) {
+		/* LPS branch */
+		z = 0x10000 - z;
+		zp->a = zp->a + z;
+		zp->c = zp->c + z;
+
+		/* LPS adaptation */
+		*ctx = zp_tab_dn[*ctx];
+
+		/* LPS renormalization */
+		shift = ffz(zp->a);
+		zp->avail -= shift;
+		zp->a = (unsigned short)(zp->a << shift);
+		zp->c = (unsigned short)(zp->c << shift) |
+			((zp->buffer >> zp->avail) & ((1 << shift) - 1));
+
+		if (zp->avail < 16)
+			zp_preload(zp);
+
+		/* Adjust fence */
+		zp->f = zp->c;
+		if (zp->c >= 0x8000)
+			zp->f = 0x7fff;
+		return bit ^ 1;
+	} else {
+		/* MPS adaptation */
+		if (zp->a >= zp_tab_m[*ctx])
+			*ctx = zp_tab_up[*ctx];
+
+		/* MPS renormalization */
+		zp->avail -= 1;
+		zp->a = (unsigned short)(z << 1);
+		zp->c = (unsigned short)(zp->c << 1) |
+			((zp->buffer >> zp->avail) & 1);
+
+		if (zp->avail < 16)
+			zp_preload(zp);
+
+		/* Adjust fence */
+		zp->f = zp->c;
+		if (zp->c >= 0x8000)
+			zp->f = 0x7fff;
+		return bit;
+	}
+}
+
+int
+zp_decode_imp_simple(struct zp_decoder *zp, int mps, unsigned int z)
+{
+	int shift;
+	if (z > zp->c) {
+		/* LPS branch */
+		z = 0x10000 - z;
+		zp->a = zp->a + z;
+		zp->c = zp->c + z;
+
+		/* LPS renormalization */
+		shift = ffz(zp->a);
+		zp->avail -= shift;
+		zp->a = (unsigned short)(zp->a << shift);
+		zp->c = (unsigned short)(zp->c << shift) |
+			((zp->buffer >> zp->avail) & ((1 << shift) - 1));
+
+		if (zp->avail < 16)
+			zp_preload(zp);
+
+		/* Adjust fence */
+		zp->f = zp->c;
+		if (zp->c >= 0x8000)
+			zp->f = 0x7fff;
+		return mps ^ 1;
+	} else {
+		/* MPS renormalization */
+		zp->avail -= 1;
+		zp->a = (unsigned short)(z << 1);
+		zp->c = (unsigned short)(zp->c << 1) |
+			((zp->buffer >> zp->avail) & 1);
+
+		if (zp->avail < 16)
+			zp_preload(zp);
+
+		/* Adjust fence */
+		zp->f = zp->c;
+		if (zp->c >= 0x8000)
+			zp->f = 0x7fff;
+		return mps;
+	}
 }
 
 int
 zp_decode(struct zp_decoder *zp, unsigned char *ctx)
 {
-	unsigned int z, d, b;
-
-	z = zp->a + zp_tab_p[*ctx];
-
+	unsigned int z = zp->a + zp_tab_p[*ctx];
 	if (z <= zp->f) {
 		zp->a = z;
+printf("zp bit=%d\n", *ctx & 1);
 		return *ctx & 1;
 	}
-
-	d = 0x6000 + ((z + zp->a) >> 2);
-	if (z > d)
-		z = d;
-
-	if (zp->c >= z) {
-		b = *ctx & 1;
-		if (zp->a >= zp_tab_m[*ctx])
-			*ctx = zp_tab_up[*ctx];
-		zp->a = z;
-	} else {
-		b = (*ctx & 1) ^ 1;
-		zp->a = zp->a + 0x10000 - z;
-		zp->c = zp->c + 0x10000 - z;
-		*ctx = zp_tab_dn[*ctx];
-	}
-
-	while (zp->a >= 0x8000) {
-		zp->a = zp->a + zp->a - 0x10000;
-		zp->c = zp->c + zp->c - 0x10000 + zp_read_bit(zp);
-	}
-
-	zp->f = zp->c;
-	if (zp->f > 0x7fff)
-		zp->f = 0x7fff;
-
+	int b = zp_decode_imp(zp, ctx, z);
+printf("zp bit=%d\n", b);
 	return b;
 }
 
 int
 zp_decode_pass_through(struct zp_decoder *zp)
 {
-	unsigned int z, b;
-
-	z = 0x8000 + (zp->a >> 1);
-
-	if (zp->c >= z) {
-		b = 0;
-		zp->a = z;
-	} else {
-		b = 1;
-		zp->a = zp->a + 0x10000 - z;
-		zp->c = zp->c + 0x10000 - z;
-	}
-
-	while (zp->a >= 0x8000) {
-		zp->a = zp->a + zp->a - 0x10000;
-		zp->c = zp->c + zp->c - 0x10000 + zp_read_bit(zp);
-	}
-
-	zp->f = zp->c;
-	if (zp->f > 0x7fff)
-		zp->f = 0x7fff;
-
-	return b;
+	return zp_decode_imp_simple(zp, 0, 0x8000 + (zp->a >> 1));
 }
+
