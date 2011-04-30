@@ -23,9 +23,9 @@ enum {
 
 struct bitmap {
 	int w, h;
-	int stride, size;
-	int x0, y0, x1, y1;
+	int stride;
 	unsigned char *data;
+	unsigned char *orig;
 };
 
 struct jb2_decoder {
@@ -34,6 +34,13 @@ struct jb2_decoder {
 	/* symbol library */
 	int symlen, symcap;
 	struct bitmap **symbol;
+
+	/* relative locations */
+	int line_left, line_bottom;
+	int prev_right, prev_bottom;
+	int baseline[3], baseline_pos;
+
+	struct bitmap *page;
 
 	/* number coder */
 	int cur, len;
@@ -52,10 +59,10 @@ struct jb2_decoder {
 	unsigned int abs_size_y;
 	unsigned int image_size_dist;
 	unsigned int inherited_shape_count_dist;
-	unsigned int rel_loc_x_current;
-	unsigned int rel_loc_x_last;
-	unsigned int rel_loc_y_current;
-	unsigned int rel_loc_y_last;
+	unsigned int rel_loc_x_prev;
+	unsigned int rel_loc_x_first;
+	unsigned int rel_loc_y_prev;
+	unsigned int rel_loc_y_first;
 	unsigned int rel_size_x;
 	unsigned int rel_size_y;
 
@@ -94,10 +101,10 @@ jb2_reset_num_coder(struct jb2_decoder *jb)
 	jb->abs_size_y = 0;
 	jb->image_size_dist = 0;
 	jb->inherited_shape_count_dist = 0;
-	jb->rel_loc_x_current = 0;
-	jb->rel_loc_x_last = 0;
-	jb->rel_loc_y_current = 0;
-	jb->rel_loc_y_last = 0;
+	jb->rel_loc_x_prev = 0;
+	jb->rel_loc_x_first = 0;
+	jb->rel_loc_y_prev = 0;
+	jb->rel_loc_y_first = 0;
 	jb->rel_size_x = 0;
 	jb->rel_size_y = 0;
 
@@ -181,83 +188,100 @@ jb2_new_bitmap(int w, int h)
 	struct bitmap *bm = malloc(sizeof(struct bitmap));
 	bm->w = w;
 	bm->h = h;
-	bm->stride = (w + 7) >> 3;
-	bm->size = bm->stride * h;
-	bm->data = malloc(bm->size);
-	memset(bm->data, 0, bm->size);
+	bm->stride = w;
+	bm->data = malloc(w * h);
+	bm->orig = bm->data;
+	memset(bm->data, 0, w * h);
 	return bm;
 }
 
 static inline int getbit(struct bitmap *bm, int x, int y)
 {
-	unsigned char *row;
 	if (x < 0 || y < 0 || x >= bm->w || y >= bm->h)
 		return 0;
-	row = bm->data + y * bm->stride;
-	return (row[x >> 3] >> (7 - (x & 7))) & 1;
+	return bm->data[y * bm->stride + x];
 }
 
 static inline void setbit(struct bitmap *bm, int x, int y, int v)
 {
-	unsigned char *row;
-	row = bm->data + y * bm->stride;
-	row[x >> 3] |= v << (7 - (x & 7));
+	if (x < 0 || y < 0 || x >= bm->w || y >= bm->h)
+		return;
+	bm->data[y * bm->stride + x] = v;
 }
 
 static void
 jb2_free_bitmap(struct bitmap *bm)
 {
-	free(bm->data);
+	free(bm->orig);
 	free(bm);
 }
 
 static void
-jb2_update_bbox_x1(struct bitmap *bm)
+jb2_blit_bitmap(struct bitmap *dst, struct bitmap *src, int dx, int dy)
 {
-	int y;
-	for (bm->x1 = bm->w - 1; bm->x1 >= 0; bm->x1--)
+	int x, y;
+	for (y = 0; y < src->h; y++) {
+		for (x = 0; x < src->w; x++) {
+			if (getbit(src, x, y))
+				setbit(dst, dx+x, dy+y, 0);
+		}
+	}
+}
+
+static int
+jb2_get_bbox_x0(struct bitmap *bm)
+{
+	int x, y;
+	for (x = 0; x < bm->w; x++)
 		for (y = 0; y < bm->h; y++)
-			if (getbit(bm, bm->x1, y))
-				return;
+			if (getbit(bm, x, y))
+				return x;
+	return 0;
 }
 
-static void
-jb2_update_bbox_y1(struct bitmap *bm)
+static int
+jb2_get_bbox_x1(struct bitmap *bm)
 {
-	int x;
-	for (bm->y1 = bm->h - 1; bm->y1 >= 0; bm->y1--)
-		for (x = 0; x < bm->w; x++)
-			if (getbit(bm, x, bm->y1))
-				return;
-}
-
-static void
-jb2_update_bbox_x0(struct bitmap *bm)
-{
-	int y;
-	for (bm->x0 = 0; bm->x0 <= bm->x1; bm->x0++)
+	int x, y;
+	for (x = bm->w - 1; x >= 0; x--)
 		for (y = 0; y < bm->h; y++)
-			if (getbit(bm, bm->x0, y))
-				return;
+			if (getbit(bm, x, y))
+				return x;
+	return 0;
 }
 
-static void
-jb2_update_bbox_y0(struct bitmap *bm)
+static int
+jb2_get_bbox_y0(struct bitmap *bm)
 {
-	int x;
-	for (bm->y0 = 0; bm->y0 <= bm->y1; bm->y0++)
+	int x, y;
+	for (y = 0; y < bm->h; y++)
 		for (x = 0; x < bm->w; x++)
-			if (getbit(bm, x, bm->y0))
-				return;
+			if (getbit(bm, x, y))
+				return y;
+	return 0;
+}
+
+static int
+jb2_get_bbox_y1(struct bitmap *bm)
+{
+	int x, y;
+	for (y = bm->h - 1; y >= 0; y--)
+		for (x = 0; x < bm->w; x++)
+			if (getbit(bm, x, y))
+				return y;
+	return 0;
 }
 
 static void
-jb2_update_bbox(struct bitmap *bm)
+jb2_trim_edges(struct bitmap *bm)
 {
-	jb2_update_bbox_x1(bm);
-	jb2_update_bbox_x0(bm);
-	jb2_update_bbox_y1(bm);
-	jb2_update_bbox_y0(bm);
+	int x0 = jb2_get_bbox_x0(bm);
+	int y0 = jb2_get_bbox_y0(bm);
+	int x1 = jb2_get_bbox_x1(bm);
+	int y1 = jb2_get_bbox_y1(bm);
+	bm->w = x1 - x0 + 1;
+	bm->h = y1 - y0 + 1;
+	bm->data += x0 + y0 * bm->stride;
 }
 
 static void
@@ -315,9 +339,7 @@ jb2_decode_bitmap_direct(struct jb2_decoder *jb, int w, int h)
 		}
 	}
 
-	jb2_print_bitmap(bm);
-
-	jb2_update_bbox(bm);
+//	jb2_print_bitmap(bm);
 
 	return bm;
 }
@@ -356,37 +378,26 @@ static struct bitmap *
 jb2_decode_bitmap_refine(struct jb2_decoder *jb, int s, int xdiff, int ydiff)
 {
 	struct bitmap *bm, *sm = jb->symbol[s];
-	int sw = sm->x1 - sm->x0 + 1;
-	int sh = sm->y1 - sm->y0 + 1;
-	int w = sw + xdiff;
-	int h = sh + ydiff;
-	int xoff = (sw-1) / 2 - (w-1) / 2 + sm->x0;
-	int yoff = (sh) / 2 - (h) / 2 + sm->y0;
+	int w = sm->w + xdiff;
+	int h = sm->h + ydiff;
+	int xoff = (sm->w-1) / 2 - (w-1) / 2;
+	int yoff = sm->h / 2 - h / 2;
 	int x, y, ctx, v;
-
-printf("jb2 refine src=%d,%d bbox=%d,%d,%d,%d\n",
-	sm->w, sm->h, sm->x0, sm->y0, sm->x1, sm->y1);
-printf("jb2 refine dst=%d,%d off=%d,%d\n", w, h, xoff, yoff);
 
 	bm = jb2_new_bitmap(w, h);
 
 	for (y = 0; y < h; y++) {
 		ctx = jb2_refine_context(bm, 0, y, sm, xoff, y+yoff);
-printf("jb2: (%04x) ", ctx);
+//printf("jb2: (%04x) ", ctx);
 		for (x = 0; x < w; x++) {
 			ctx = jb2_refine_context(bm, x, y, sm, x+xoff, y+yoff);
 			v = zp_decode(&jb->zp, jb->refine + ctx);
 			setbit(bm, x, y, v);
-if (getbit(sm, x+xoff, y+yoff) != v)
-printf("%c", v?'X':'.');
-else
-printf("%c", v?'#':'-');
+//if (getbit(sm, x+xoff, y+yoff) != v) printf("%c", v?'X':'.'); else printf("%c", v?'#':'-');
 			ctx = jb2_shift_refine_context(bm, x+1, y, sm, x+xoff+1, y+yoff, ctx, v);
 		}
-printf("\n");
+//printf("\n");
 	}
-
-	jb2_update_bbox(bm);
 
 	return bm;
 }
@@ -398,20 +409,61 @@ jb2_add_to_library(struct jb2_decoder *jb, struct bitmap *bm)
 		jb->symcap += 1000;
 		jb->symbol = realloc(jb->symbol, jb->symcap * sizeof(struct bitmap*));
 	}
+	jb2_trim_edges(bm);
 	jb->symbol[jb->symlen++] = bm;
 }
 
 static void
-jb2_decode_rel_loc(struct jb2_decoder *jb, int *x, int *y)
+jb2_set_baseline(struct jb2_decoder *jb, int y)
 {
-	int t = zp_decode(&jb->zp, &jb->offset_type_dist);
+	jb->baseline[0] = y;
+	jb->baseline[1] = y;
+	jb->baseline[2] = y;
+	jb->baseline_pos = 0;
+}
+
+static int
+jb2_update_baseline(struct jb2_decoder *jb, int y)
+{
+	int *s = jb->baseline;
+	if (++jb->baseline_pos == 3)
+		jb->baseline_pos = 0;
+	s[jb->baseline_pos] = y;
+
+	return s[0] >= s[1] ?
+		(s[0] > s[2] ? (s[1] >= s[2] ? s[1] : s[2]) : s[0]) :
+		(s[0] < s[2] ? (s[1] >= s[2] ? s[2] : s[1]) : s[0]);
+}
+
+static void
+jb2_decode_rel_loc(struct jb2_decoder *jb, struct bitmap *bm, int *xp, int *yp)
+{
+	int dx, dy, left, right, top, bottom, t;
+	t = zp_decode(&jb->zp, &jb->offset_type_dist);
 	if (t) {
-		*x = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_last);
-		*y = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_last);
+		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_first);
+		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_first);
+		left = jb->line_left + dx;
+		top = jb->line_bottom + dy;
+		bottom = top + bm->h - 1;
+		right = left + bm->w - 1;
+		jb->line_left = left;
+		jb->line_bottom = bottom;
+		jb->prev_right = right;
+		jb->prev_bottom = bottom;
+		jb2_set_baseline(jb, bottom);
 	} else {
-		*x = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_current);
-		*y = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_current);
+		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_prev);
+		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_prev);
+		left = jb->prev_right + dx;
+		bottom = jb->prev_bottom + dy;
+		top = bottom - bm->h + 1;
+		right = left + bm->w - 1;
+		jb->prev_right = right;
+		jb->prev_bottom = jb2_update_baseline(jb, bottom);
 	}
+	*xp = left;
+	*yp = top;
 }
 
 static void
@@ -421,6 +473,8 @@ jb2_decode_start_of_data(struct jb2_decoder *jb)
 	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size_dist);
 	int r = zp_decode(&jb->zp, &jb->dist_refinement_flag);
 	printf("jb2: start-of-data %dx%d refine=%d\n", w, h, r);
+	jb->page = jb2_new_bitmap(w, h);
+	memset(jb->page->data, 255, w * h);
 }
 
 static void
@@ -431,18 +485,10 @@ jb2_decode_new_symbol(struct jb2_decoder *jb)
 	w = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_x);
 	h = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_y);
 	bm = jb2_decode_bitmap_direct(jb, w, h);
-	jb2_decode_rel_loc(jb, &x, &y);
+	jb2_decode_rel_loc(jb, bm, &x, &y);
 	printf("jb2: new-symbol %dx%d %d,%d\n", w, h, x, y);
+	jb2_blit_bitmap(jb->page, bm, x, y);
 	jb2_add_to_library(jb, bm);
-}
-
-static void
-jb2_decode_matched_copy(struct jb2_decoder *jb)
-{
-	int s, x, y;
-	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->dist_match_index);
-	jb2_decode_rel_loc(jb, &x, &y);
-	printf("jb2: matched-copy s=%d %d,%d\n", s, x, y);
 }
 
 static void
@@ -454,8 +500,22 @@ jb2_decode_matched_refine(struct jb2_decoder *jb)
 	w = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_size_x);
 	h = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_size_y);
 	bm = jb2_decode_bitmap_refine(jb, s, w, h);
-	jb2_decode_rel_loc(jb, &x, &y);
+	jb2_decode_rel_loc(jb, bm, &x, &y);
+	printf("jb2: matched-refine s=%d %dx%d %d,%d\n", s, w, h, x, y);
+	jb2_blit_bitmap(jb->page, bm, x, y);
 	jb2_add_to_library(jb, bm);
+}
+
+static void
+jb2_decode_matched_copy(struct jb2_decoder *jb)
+{
+	struct bitmap *bm;
+	int s, x, y;
+	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->dist_match_index);
+	bm = jb->symbol[s];
+	jb2_decode_rel_loc(jb, bm, &x, &y);
+	printf("jb2: matched-copy s=%d %d,%d\n", s, x, y);
+	jb2_blit_bitmap(jb->page, bm, x, y);
 }
 
 static int
@@ -472,6 +532,7 @@ jb2_decode_record(struct jb2_decoder *jb)
 	case MATCHED_COPY: jb2_decode_matched_copy(jb); break;
 	case MATCHED_REFINE: jb2_decode_matched_refine(jb); break;
 	case END_OF_DATA: printf("jb2: end-of-data\n"); return 1;
+	default: printf("jb2: unimplemented record type\n"); return 1;
 	}
 
 	return 0;
@@ -501,7 +562,18 @@ jb2_decode(unsigned char *src, int srclen)
 	jb->symcap = 0;
 	jb->symbol = NULL;
 
+	jb->line_left = 0;
+	jb->line_bottom = 0;
+	jb->prev_right = 0;
+	jb->prev_bottom = 0;
+	jb2_set_baseline(jb, 0);
+
 	while (1)
 		if (jb2_decode_record(jb))
 			break;
+
+	FILE *f = fopen("out.pgm", "wb");
+	fprintf(f, "P5\n%d %d\n255\n", jb->page->w, jb->page->h);
+	fwrite(jb->page->data, jb->page->w, jb->page->h, f);
+	fclose(f);
 }

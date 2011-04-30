@@ -196,6 +196,7 @@ dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
 	printf("Sjbz {\n");
 	jb2_decode(data, size);
 	printf("}\n");
+exit(0);
 }
 
 void
