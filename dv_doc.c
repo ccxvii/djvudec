@@ -191,10 +191,23 @@ dv_parse_incl(struct dv_document *doc, unsigned char *data, int size)
 }
 
 void
+dv_parse_djbz(struct dv_document *doc, unsigned char *data, int size)
+{
+	printf("Djbz {\n");
+	doc->dict = jb2_new_decoder(data, size, NULL);
+	jb2_decode(doc->dict);
+	printf("}\n");
+}
+
+void
 dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
 {
+	struct jb2_decoder *jb;
 	printf("Sjbz {\n");
-	jb2_decode(data, size);
+	jb = jb2_new_decoder(data, size, doc->dict);
+	jb2_decode(jb);
+	jb2_print_page(jb);
+	jb2_free_decoder(jb);
 	printf("}\n");
 exit(0);
 }
@@ -217,6 +230,8 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 		dv_parse_info(doc, data, len);
 	else if (tag == TAG('I','N','C','L'))
 		dv_parse_incl(doc, data, len);
+	else if (tag == TAG('D','j','b','z'))
+		dv_parse_djbz(doc, data, len);
 	else if (tag == TAG('S','j','b','z'))
 		dv_parse_sjbz(doc, data, len);
 	else
@@ -270,6 +285,7 @@ dv_open_document(FILE *file)
 
 	doc = malloc(sizeof(struct dv_document));
 	doc->file = file;
+	doc->dict = NULL;
 
 	dv_read_iff(doc);
 

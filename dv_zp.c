@@ -1,7 +1,7 @@
 #include "mudjvu.h"
 
 /*
-	The Z'-Coder is an approximate binary arithmetic coder.
+	The Z'-Coder is an approximate adaptive binary arithmetic coder.
 
 	The Z'-Coder as listed in the DjVu spec is incomplete.
 	The implemented Z'-Coder uses a fence, like the Z-Coder.
