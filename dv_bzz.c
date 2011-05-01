@@ -1,7 +1,7 @@
 #include "djvudec.h"
 
 static unsigned int
-bzz_decode_raw(struct zp_decoder *zp, int b)
+bzz_decode_raw(struct zpdec *zp, int b)
 {
 	int n = 1;
 	int m = 1 << b;
@@ -11,7 +11,7 @@ bzz_decode_raw(struct zp_decoder *zp, int b)
 }
 
 static unsigned int
-bzz_decode_bin(struct zp_decoder *zp, unsigned char *ctx, int b)
+bzz_decode_bin(struct zpdec *zp, unsigned char *ctx, int b)
 {
 	int n = 1;
 	int m = 1 << b;
@@ -22,7 +22,7 @@ bzz_decode_bin(struct zp_decoder *zp, unsigned char *ctx, int b)
 }
 
 static unsigned char *
-bzz_decode_block(struct zp_decoder *zp, unsigned char *ctx, int *outlen)
+bzz_decode_block(struct zpdec *zp, unsigned char *ctx, int *outlen)
 {
 	unsigned char mtf[256];
 	int count[256];
@@ -199,7 +199,7 @@ error:
 unsigned char *
 bzz_decode(unsigned char *src, int srclen, int *outlen)
 {
-	struct zp_decoder zp;
+	struct zpdec zp;
 	unsigned char ctx[260];
 	zp_init(&zp, src, srclen);
 	memset(ctx, 0, sizeof ctx);

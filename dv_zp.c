@@ -100,14 +100,14 @@ static const unsigned char zp_tab_dn[256] = {
 	21, 16, 15, 8, 241, 242, 7, 10, 245, 2, 1, 83, 250, 2, 143, 246,
 };
 
-static inline unsigned int zp_read_byte(struct zp_decoder *zp)
+static inline unsigned int zp_read_byte(struct zpdec *zp)
 {
 	if (zp->rp < zp->ep)
 		return *zp->rp++;
 	return 0xff;
 }
 
-static inline int zp_read_bit(struct zp_decoder *zp)
+static inline int zp_read_bit(struct zpdec *zp)
 {
 	int b;
 	zp->avail--;
@@ -120,7 +120,7 @@ static inline int zp_read_bit(struct zp_decoder *zp)
 }
 
 void
-zp_init(struct zp_decoder *zp, unsigned char *data, int len)
+zp_init(struct zpdec *zp, unsigned char *data, int len)
 {
 	zp->rp = data;
 	zp->ep = data + len;
@@ -138,7 +138,7 @@ zp_init(struct zp_decoder *zp, unsigned char *data, int len)
 }
 
 int
-zp_decode(struct zp_decoder *zp, unsigned char *ctx)
+zp_decode(struct zpdec *zp, unsigned char *ctx)
 {
 	unsigned int z, d, b;
 
@@ -178,7 +178,7 @@ zp_decode(struct zp_decoder *zp, unsigned char *ctx)
 }
 
 int
-zp_decode_pass_through(struct zp_decoder *zp)
+zp_decode_pass_through(struct zpdec *zp)
 {
 	unsigned int z, b;
 

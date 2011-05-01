@@ -28,8 +28,8 @@ struct bitmap {
 	unsigned char *orig;
 };
 
-struct jb2_decoder {
-	struct zp_decoder zp;
+struct jb2dec {
+	struct zpdec zp;
 
 	/* symbol library */
 	int symlen, symcap, symshr;
@@ -75,11 +75,11 @@ struct jb2_decoder {
 	/* output page */
 	int started;
 	struct bitmap *page;
-	struct jb2_decoder *dict;
+	struct jb2dec *dict;
 };
 
 static void
-jb2_grow_num_coder(struct jb2_decoder *jb)
+jb2_grow_num_coder(struct jb2dec *jb)
 {
 	int newcap = jb->numcap + CHUNK;
 	jb->bit = realloc(jb->bit, newcap);
@@ -92,7 +92,7 @@ jb2_grow_num_coder(struct jb2_decoder *jb)
 }
 
 static void
-jb2_reset_num_coder(struct jb2_decoder *jb)
+jb2_reset_num_coder(struct jb2dec *jb)
 {
 	jb->comment_octet = 0;
 	jb->comment_length = 0;
@@ -118,7 +118,7 @@ jb2_reset_num_coder(struct jb2_decoder *jb)
 }
 
 static int
-jb2_decode_num(struct jb2_decoder *jb, int low, int high, unsigned int *ctx)
+jb2_decode_num(struct jb2dec *jb, int low, int high, unsigned int *ctx)
 {
 	int negative, cutoff, phase, range, decision;
 
@@ -219,7 +219,7 @@ jb2_free_bitmap(struct bitmap *bm)
 }
 
 static void
-jb2_blit_bitmap(struct jb2_decoder *jb, struct bitmap *src, int dx, int dy)
+jb2_blit_bitmap(struct jb2dec *jb, struct bitmap *src, int dx, int dy)
 {
 	int x, y;
 	if (!jb->page)
@@ -289,7 +289,7 @@ jb2_trim_edges(struct bitmap *bm)
 }
 
 static void
-jb2_add_to_library(struct jb2_decoder *jb, struct bitmap *bm)
+jb2_add_to_library(struct jb2dec *jb, struct bitmap *bm)
 {
 	if (jb->symlen + 1 >= jb->symcap) {
 		jb->symcap += 1000;
@@ -354,7 +354,7 @@ jb2_shift_refine_context(struct bitmap *dm, int dx, int dy,
 }
 
 static struct bitmap *
-jb2_decode_bitmap_direct(struct jb2_decoder *jb, int w, int h)
+jb2_decode_bitmap_direct(struct jb2dec *jb, int w, int h)
 {
 	struct bitmap *bm;
 	int ctx, x, y, v;
@@ -374,7 +374,7 @@ jb2_decode_bitmap_direct(struct jb2_decoder *jb, int w, int h)
 }
 
 static struct bitmap *
-jb2_decode_bitmap_refine(struct jb2_decoder *jb, int s, int dw, int dh)
+jb2_decode_bitmap_refine(struct jb2dec *jb, int s, int dw, int dh)
 {
 	struct bitmap *bm, *sm;
 	int w, h, x, y, dx, dy, ctx, v;
@@ -401,14 +401,14 @@ jb2_decode_bitmap_refine(struct jb2_decoder *jb, int s, int dw, int dh)
 }
 
 static void
-jb2_set_baseline(struct jb2_decoder *jb, int y)
+jb2_set_baseline(struct jb2dec *jb, int y)
 {
 	jb->baseline[0] = jb->baseline[1] = jb->baseline[2] = y;
 	jb->baseline_pos = 0;
 }
 
 static int
-jb2_update_baseline(struct jb2_decoder *jb, int y)
+jb2_update_baseline(struct jb2dec *jb, int y)
 {
 	int *s = jb->baseline;
 	if (++jb->baseline_pos == 3)
@@ -420,7 +420,7 @@ jb2_update_baseline(struct jb2_decoder *jb, int y)
 }
 
 static void
-jb2_decode_rel_loc(struct jb2_decoder *jb, struct bitmap *bm, int *xp, int *yp)
+jb2_decode_rel_loc(struct jb2dec *jb, struct bitmap *bm, int *xp, int *yp)
 {
 	int dx, dy, left, right, top, bottom, t;
 	t = zp_decode(&jb->zp, &jb->offset_type);
@@ -451,7 +451,7 @@ jb2_decode_rel_loc(struct jb2_decoder *jb, struct bitmap *bm, int *xp, int *yp)
 }
 
 static void
-jb2_decode_start_of_data(struct jb2_decoder *jb)
+jb2_decode_start_of_data(struct jb2dec *jb)
 {
 	int w = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
 	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
@@ -464,7 +464,7 @@ jb2_decode_start_of_data(struct jb2_decoder *jb)
 }
 
 static int
-jb2_decode_dict_or_reset(struct jb2_decoder *jb)
+jb2_decode_dict_or_reset(struct jb2dec *jb)
 {
 	if (!jb->started) {
 		int i, count;
@@ -481,7 +481,7 @@ jb2_decode_dict_or_reset(struct jb2_decoder *jb)
 }
 
 static void
-jb2_decode_new_symbol(struct jb2_decoder *jb, int doimg, int dolib)
+jb2_decode_new_symbol(struct jb2dec *jb, int doimg, int dolib)
 {
 	struct bitmap *bm;
 	int w, h, x, y;
@@ -497,7 +497,7 @@ jb2_decode_new_symbol(struct jb2_decoder *jb, int doimg, int dolib)
 }
 
 static void
-jb2_decode_matched_refine(struct jb2_decoder *jb, int doimg, int dolib)
+jb2_decode_matched_refine(struct jb2dec *jb, int doimg, int dolib)
 {
 	struct bitmap *bm;
 	int s, w, h, x, y;
@@ -514,7 +514,7 @@ jb2_decode_matched_refine(struct jb2_decoder *jb, int doimg, int dolib)
 }
 
 static void
-jb2_decode_matched_copy(struct jb2_decoder *jb)
+jb2_decode_matched_copy(struct jb2dec *jb)
 {
 	struct bitmap *bm;
 	int s, x, y;
@@ -525,7 +525,7 @@ jb2_decode_matched_copy(struct jb2_decoder *jb)
 }
 
 static void
-jb2_decode_non_symbol_data(struct jb2_decoder *jb)
+jb2_decode_non_symbol_data(struct jb2dec *jb)
 {
 	struct bitmap *bm;
 	int x, y, w, h;
@@ -540,7 +540,7 @@ jb2_decode_non_symbol_data(struct jb2_decoder *jb)
 }
 
 static void
-jb2_decode_comment(struct jb2_decoder *jb)
+jb2_decode_comment(struct jb2dec *jb)
 {
 	int n = jb2_decode_num(jb, 0, BIGPOS, &jb->comment_length);
 	while (n--)
@@ -548,7 +548,7 @@ jb2_decode_comment(struct jb2_decoder *jb)
 }
 
 int
-jb2_decode(struct jb2_decoder *jb)
+jb2_decode(struct jb2dec *jb)
 {
 	int rec;
 	while (1) {
@@ -597,12 +597,12 @@ jb2_decode(struct jb2_decoder *jb)
 	}
 }
 
-struct jb2_decoder *
-jb2_new_decoder(unsigned char *src, int srclen, struct jb2_decoder *dict)
+struct jb2dec *
+jb2_new_decoder(unsigned char *src, int srclen, struct jb2dec *dict)
 {
-	struct jb2_decoder *jb;
+	struct jb2dec *jb;
 
-	jb = malloc(sizeof(struct jb2_decoder));
+	jb = malloc(sizeof(struct jb2dec));
 
 	zp_init(&jb->zp, src, srclen);
 
@@ -638,7 +638,7 @@ jb2_new_decoder(unsigned char *src, int srclen, struct jb2_decoder *dict)
 }
 
 void
-jb2_print_page(struct jb2_decoder *jb)
+jb2_print_page(struct jb2dec *jb)
 {
 	FILE *f = fopen("out.pgm", "wb");
 	fprintf(f, "P5\n%d %d\n255\n", jb->page->w, jb->page->h);
@@ -647,7 +647,7 @@ jb2_print_page(struct jb2_decoder *jb)
 }
 
 void
-jb2_free_decoder(struct jb2_decoder *jb)
+jb2_free_decoder(struct jb2dec *jb)
 {
 	int i;
 

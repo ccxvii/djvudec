@@ -25,7 +25,7 @@ $(OUT)/%.o : %.c djvudec.h | $(OUT)
 	$(CC_CMD)
 
 AOUT := $(OUT)/a.out
-SRC := dv_doc.c dv_bzz.c dv_jb2.c dv_zp.c
+SRC := dv_doc.c dv_iw44.c dv_jb2.c dv_bzz.c dv_zp.c
 
 $(AOUT) : $(addprefix $(OUT)/, $(SRC:%.c=%.o))
 	$(LINK_CMD)

@@ -5,7 +5,7 @@
 void
 usage(void)
 {
-	fprintf(stderr, "usage: mudjvu input.djvu\n");
+	fprintf(stderr, "usage: djvudec input.djvu\n");
 	exit(1);
 }
 
@@ -191,12 +191,21 @@ dv_parse_djbz(struct dv_document *doc, unsigned char *data, int size)
 void
 dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
 {
-	struct jb2_decoder *jb;
+	struct jb2dec *jb;
 	printf("Sjbz {\n");
 	jb = jb2_new_decoder(data, size, doc->dict);
 	jb2_decode(jb);
 	jb2_print_page(jb);
 	jb2_free_decoder(jb);
+	printf("}\n");
+exit(0);
+}
+
+void
+dv_parse_iw44(struct dv_document *doc, unsigned char *data, int size)
+{
+	printf("BG44 {\n");
+	iw44_decode(data, size);
 	printf("}\n");
 exit(0);
 }
@@ -219,10 +228,12 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 		dv_parse_info(doc, data, len);
 	else if (tag == TAG('I','N','C','L'))
 		dv_parse_incl(doc, data, len);
-	else if (tag == TAG('D','j','b','z'))
-		dv_parse_djbz(doc, data, len);
-	else if (tag == TAG('S','j','b','z'))
-		dv_parse_sjbz(doc, data, len);
+//	else if (tag == TAG('D','j','b','z'))
+//		dv_parse_djbz(doc, data, len);
+//	else if (tag == TAG('S','j','b','z'))
+//		dv_parse_sjbz(doc, data, len);
+	else if (tag == TAG('B','G','4','4'))
+		dv_parse_iw44(doc, data, len);
 	else
 		printf("tag %c%c%c%c\n", tag>>24, tag>>16, tag>>8, tag);
 	free(data);
