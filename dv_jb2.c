@@ -9,15 +9,15 @@ enum {
 enum {
 	START_OF_DATA = 0,
 	NEW_SYMBOL = 1,
-	NEW_SYMBOL_LIBRARY_ONLY = 2,
-	NEW_SYMBOL_IMAGE_ONLY = 3,
+	NEW_SYMBOL_LIBRARY = 2,
+	NEW_SYMBOL_IMAGE = 3,
 	MATCHED_REFINE = 4,
-	MATCHED_REFINE_LIBRARY_ONLY = 5,
-	MATCHED_REFINE_IMAGE_ONLY = 6,
+	MATCHED_REFINE_LIBRARY = 5,
+	MATCHED_REFINE_IMAGE = 6,
 	MATCHED_COPY = 7,
 	NON_SYMBOL_DATA = 8,
-	REQUIRED_DICT_OR_RESET = 9,
-	PRESERVED_COMMENT = 10,
+	DICT_OR_RESET = 9,
+	COMMENT = 10,
 	END_OF_DATA = 11
 };
 
@@ -32,41 +32,41 @@ struct jb2_decoder {
 	struct zp_decoder zp;
 
 	/* symbol library */
-	int symlen, symcap;
+	int symlen, symcap, symshr;
 	struct bitmap **symbol;
 
 	/* relative locations */
-	int line_left, line_bottom;
-	int prev_right, prev_bottom;
+	int new_left, new_bottom;
+	int same_right, same_bottom;
 	int baseline[3], baseline_pos;
 
 	/* number coder */
-	int cur, len;
+	int numlen, numcap;
 	unsigned char *bit;
 	unsigned int *left;
 	unsigned int *right;
 
 	/* number contexts */
-	unsigned int dist_comment_byte;
-	unsigned int dist_comment_length;
-	unsigned int dist_record_type;
-	unsigned int dist_match_index;
-	unsigned int abs_loc_x;
-	unsigned int abs_loc_y;
+	unsigned int record_type;
+	unsigned int image_size;
+	unsigned int match_index;
 	unsigned int abs_size_x;
 	unsigned int abs_size_y;
-	unsigned int image_size_dist;
-	unsigned int inherited_shape_count_dist;
-	unsigned int rel_loc_x_prev;
-	unsigned int rel_loc_x_first;
-	unsigned int rel_loc_y_prev;
-	unsigned int rel_loc_y_first;
 	unsigned int rel_size_x;
 	unsigned int rel_size_y;
+	unsigned int abs_loc_x;
+	unsigned int abs_loc_y;
+	unsigned int rel_loc_x_same;
+	unsigned int rel_loc_y_same;
+	unsigned int rel_loc_x_new;
+	unsigned int rel_loc_y_new;
+	unsigned int comment_length;
+	unsigned int comment_octet;
+	unsigned int inherited_shape_count;
 
 	/* bit contexts */
-	unsigned char dist_refinement_flag;
-	unsigned char offset_type_dist;
+	unsigned char refinement_flag;
+	unsigned char offset_type;
 
 	/* bitmap contexts */
 	unsigned char direct[1024];
@@ -81,40 +81,40 @@ struct jb2_decoder {
 static void
 jb2_grow_num_coder(struct jb2_decoder *jb)
 {
-	int newlen = jb->len + CHUNK;
-	jb->bit = realloc(jb->bit, newlen);
-	jb->left = realloc(jb->left, newlen * sizeof(unsigned int));
-	jb->right = realloc(jb->right, newlen * sizeof(unsigned int));
-	memset(jb->bit + jb->len, 0, CHUNK);
-	memset(jb->left + jb->len, 0, CHUNK * sizeof(unsigned int));
-	memset(jb->right + jb->len, 0, CHUNK * sizeof(unsigned int));
-	jb->len = newlen;
+	int newcap = jb->numcap + CHUNK;
+	jb->bit = realloc(jb->bit, newcap);
+	jb->left = realloc(jb->left, newcap * sizeof(unsigned int));
+	jb->right = realloc(jb->right, newcap * sizeof(unsigned int));
+	memset(jb->bit + jb->numcap, 0, CHUNK);
+	memset(jb->left + jb->numcap, 0, CHUNK * sizeof(unsigned int));
+	memset(jb->right + jb->numcap, 0, CHUNK * sizeof(unsigned int));
+	jb->numcap = newcap;
 }
 
 static void
 jb2_reset_num_coder(struct jb2_decoder *jb)
 {
-	jb->dist_comment_byte = 0;
-	jb->dist_comment_length = 0;
-	jb->dist_record_type = 0;
-	jb->dist_match_index = 0;
+	jb->comment_octet = 0;
+	jb->comment_length = 0;
+	jb->record_type = 0;
+	jb->match_index = 0;
 	jb->abs_loc_x = 0;
 	jb->abs_loc_y = 0;
 	jb->abs_size_x = 0;
 	jb->abs_size_y = 0;
-	jb->image_size_dist = 0;
-	jb->inherited_shape_count_dist = 0;
-	jb->rel_loc_x_prev = 0;
-	jb->rel_loc_x_first = 0;
-	jb->rel_loc_y_prev = 0;
-	jb->rel_loc_y_first = 0;
+	jb->image_size = 0;
+	jb->inherited_shape_count = 0;
+	jb->rel_loc_x_new = 0;
+	jb->rel_loc_y_new = 0;
+	jb->rel_loc_x_same = 0;
+	jb->rel_loc_y_same = 0;
 	jb->rel_size_x = 0;
 	jb->rel_size_y = 0;
 
-	memset(jb->bit, 0, jb->len);
-	memset(jb->left, 0, jb->len * sizeof(unsigned int));
-	memset(jb->right, 0, jb->len * sizeof(unsigned int));
-	jb->cur = 1;
+	memset(jb->bit, 0, jb->numcap);
+	memset(jb->left, 0, jb->numcap * sizeof(unsigned int));
+	memset(jb->right, 0, jb->numcap * sizeof(unsigned int));
+	jb->numlen = 1;
 }
 
 static int
@@ -129,9 +129,9 @@ jb2_decode_num(struct jb2_decoder *jb, int low, int high, unsigned int *ctx)
 
 	while (range != 1) {
 		if (!*ctx) {
-			if (jb->cur >= jb->len)
+			if (jb->numlen >= jb->numcap)
 				jb2_grow_num_coder(jb);
-			*ctx = jb->cur++;
+			*ctx = jb->numlen++;
 			jb->bit[*ctx] = 0;
 			jb->left[*ctx] = 0;
 			jb->right[*ctx] = 0;
@@ -289,17 +289,14 @@ jb2_trim_edges(struct bitmap *bm)
 }
 
 static void
-jb2_print_bitmap(struct bitmap *bm)
+jb2_add_to_library(struct jb2_decoder *jb, struct bitmap *bm)
 {
-	int x, y;
-//	printf("jb2: bitmap bbox=%d,%d,%d,%d\n", bm->x0, bm->y0, bm->x1, bm->y1);
-	for (y = 0; y < bm->h; y++) {
-		printf("jb2: ");
-		for (x = 0; x < bm->w; x++)
-			putchar(getbit(bm, x, y) ? '#' : '-');
-		putchar('\n');
+	if (jb->symlen + 1 >= jb->symcap) {
+		jb->symcap += 1000;
+		jb->symbol = realloc(jb->symbol, jb->symcap * sizeof(struct bitmap*));
 	}
-//	printf("jb2: end bitmap\n");
+	jb2_trim_edges(bm);
+	jb->symbol[jb->symlen++] = bm;
 }
 
 static int
@@ -324,28 +321,6 @@ jb2_shift_direct_context(struct bitmap *bm, int x, int y, int ctx, int v)
 		getbit(bm, x+2, y-1) << 2 |
 		getbit(bm, x+1, y-2) << 7 |
 		v;
-}
-
-static struct bitmap *
-jb2_decode_bitmap_direct(struct jb2_decoder *jb, int w, int h)
-{
-	struct bitmap *bm;
-	int ctx, x, y, v;
-
-	bm = jb2_new_bitmap(w, h);
-
-	for (y = 0; y < h; y++) {
-		ctx = jb2_direct_context(bm, 0, y);
-		for (x = 0; x < w; x++) {
-			v = zp_decode(&jb->zp, jb->direct + ctx);
-			setbit(bm, x, y, v);
-			ctx = jb2_shift_direct_context(bm, x+1, y, ctx, v);
-		}
-	}
-
-//	jb2_print_bitmap(bm);
-
-	return bm;
 }
 
 static int
@@ -379,50 +354,56 @@ jb2_shift_refine_context(struct bitmap *dm, int dx, int dy,
 }
 
 static struct bitmap *
-jb2_decode_bitmap_refine(struct jb2_decoder *jb, int s, int xdiff, int ydiff)
+jb2_decode_bitmap_direct(struct jb2_decoder *jb, int w, int h)
 {
-	struct bitmap *bm, *sm = jb->symbol[s];
-	int w = sm->w + xdiff;
-	int h = sm->h + ydiff;
-	int xoff = (sm->w-1) / 2 - (w-1) / 2;
-	int yoff = sm->h / 2 - h / 2;
-	int x, y, ctx, v;
+	struct bitmap *bm;
+	int ctx, x, y, v;
 
 	bm = jb2_new_bitmap(w, h);
 
 	for (y = 0; y < h; y++) {
-		ctx = jb2_refine_context(bm, 0, y, sm, xoff, y+yoff);
-//printf("jb2: (%04x) ", ctx);
+		ctx = jb2_direct_context(bm, 0, y);
 		for (x = 0; x < w; x++) {
-//			ctx = jb2_refine_context(bm, x, y, sm, x+xoff, y+yoff);
+			v = zp_decode(&jb->zp, jb->direct + ctx);
+			setbit(bm, x, y, v);
+			ctx = jb2_shift_direct_context(bm, x+1, y, ctx, v);
+		}
+	}
+
+	return bm;
+}
+
+static struct bitmap *
+jb2_decode_bitmap_refine(struct jb2_decoder *jb, int s, int dw, int dh)
+{
+	struct bitmap *bm, *sm;
+	int w, h, x, y, dx, dy, ctx, v;
+
+	sm = jb->symbol[s];
+	w = sm->w + dw;
+	h = sm->h + dh;
+	dx = (sm->w-1) / 2 - (w-1) / 2;
+	dy = sm->h / 2 - h / 2;
+
+	bm = jb2_new_bitmap(w, h);
+
+	for (y = 0; y < h; y++) {
+		ctx = jb2_refine_context(bm, 0, y, sm, dx, y+dy);
+		for (x = 0; x < w; x++) {
 			v = zp_decode(&jb->zp, jb->refine + ctx);
 			setbit(bm, x, y, v);
-//if (getbit(sm, x+xoff, y+yoff) != v) printf("%c", v?'X':'.'); else printf("%c", v?'#':'-');
-			ctx = jb2_shift_refine_context(bm, x+1, y, sm, x+xoff+1, y+yoff, ctx, v);
+			ctx = jb2_shift_refine_context(bm, x+1, y,
+					sm, x+dx+1, y+dy, ctx, v);
 		}
-//printf("\n");
 	}
 
 	return bm;
 }
 
 static void
-jb2_add_to_library(struct jb2_decoder *jb, struct bitmap *bm)
-{
-	if (jb->symlen + 1 >= jb->symcap) {
-		jb->symcap += 1000;
-		jb->symbol = realloc(jb->symbol, jb->symcap * sizeof(struct bitmap*));
-	}
-	jb2_trim_edges(bm);
-	jb->symbol[jb->symlen++] = bm;
-}
-
-static void
 jb2_set_baseline(struct jb2_decoder *jb, int y)
 {
-	jb->baseline[0] = y;
-	jb->baseline[1] = y;
-	jb->baseline[2] = y;
+	jb->baseline[0] = jb->baseline[1] = jb->baseline[2] = y;
 	jb->baseline_pos = 0;
 }
 
@@ -433,7 +414,6 @@ jb2_update_baseline(struct jb2_decoder *jb, int y)
 	if (++jb->baseline_pos == 3)
 		jb->baseline_pos = 0;
 	s[jb->baseline_pos] = y;
-
 	return s[0] >= s[1] ?
 		(s[0] > s[2] ? (s[1] >= s[2] ? s[1] : s[2]) : s[0]) :
 		(s[0] < s[2] ? (s[1] >= s[2] ? s[2] : s[1]) : s[0]);
@@ -443,28 +423,28 @@ static void
 jb2_decode_rel_loc(struct jb2_decoder *jb, struct bitmap *bm, int *xp, int *yp)
 {
 	int dx, dy, left, right, top, bottom, t;
-	t = zp_decode(&jb->zp, &jb->offset_type_dist);
+	t = zp_decode(&jb->zp, &jb->offset_type);
 	if (t) {
-		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_first);
-		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_first);
-		left = jb->line_left + dx;
-		top = jb->line_bottom + dy;
+		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_new);
+		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_new);
+		left = jb->new_left + dx;
+		top = jb->new_bottom + dy;
 		bottom = top + bm->h - 1;
 		right = left + bm->w - 1;
-		jb->line_left = left;
-		jb->line_bottom = bottom;
-		jb->prev_right = right;
-		jb->prev_bottom = bottom;
+		jb->new_left = left;
+		jb->new_bottom = bottom;
+		jb->same_right = right;
+		jb->same_bottom = bottom;
 		jb2_set_baseline(jb, bottom);
 	} else {
-		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_prev);
-		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_prev);
-		left = jb->prev_right + dx;
-		bottom = jb->prev_bottom + dy;
+		dx = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_x_same);
+		dy = -jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_loc_y_same);
+		left = jb->same_right + dx;
+		bottom = jb->same_bottom + dy;
 		top = bottom - bm->h + 1;
 		right = left + bm->w - 1;
-		jb->prev_right = right;
-		jb->prev_bottom = jb2_update_baseline(jb, bottom);
+		jb->same_right = right;
+		jb->same_bottom = jb2_update_baseline(jb, bottom);
 	}
 	*xp = left;
 	*yp = top;
@@ -473,9 +453,9 @@ jb2_decode_rel_loc(struct jb2_decoder *jb, struct bitmap *bm, int *xp, int *yp)
 static void
 jb2_decode_start_of_data(struct jb2_decoder *jb)
 {
-	int w = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size_dist);
-	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size_dist);
-	int r = zp_decode(&jb->zp, &jb->dist_refinement_flag);
+	int w = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
+	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
+	(void) zp_decode(&jb->zp, &jb->refinement_flag);
 	jb->started = 1;
 	if (w && h) {
 		jb->page = jb2_new_bitmap(w, h);
@@ -483,19 +463,21 @@ jb2_decode_start_of_data(struct jb2_decoder *jb)
 	}
 }
 
-static void
+static int
 jb2_decode_dict_or_reset(struct jb2_decoder *jb)
 {
 	if (!jb->started) {
 		int i, count;
-		count = jb2_decode_num(jb, 0, BIGPOS, &jb->inherited_shape_count_dist);
-		printf("jb2: inherit dictionary %d symbols\n", count);
-		for (i = 0; i < count; i++) {
+		count = jb2_decode_num(jb, 0, BIGPOS, &jb->inherited_shape_count);
+		if (!jb->dict || jb->dict->symlen < count || jb->symlen > 0)
+			return -1;
+		for (i = 0; i < count; i++)
 			jb2_add_to_library(jb, jb->dict->symbol[i]);
-		}
+		jb->symshr = count;
 	} else {
 		jb2_reset_num_coder(jb);
 	}
+	return 0;
 }
 
 static void
@@ -519,7 +501,7 @@ jb2_decode_matched_refine(struct jb2_decoder *jb, int doimg, int dolib)
 {
 	struct bitmap *bm;
 	int s, w, h, x, y;
-	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->dist_match_index);
+	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->match_index);
 	w = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_size_x);
 	h = jb2_decode_num(jb, BIGNEG, BIGPOS, &jb->rel_size_y);
 	bm = jb2_decode_bitmap_refine(jb, s, w, h);
@@ -536,46 +518,83 @@ jb2_decode_matched_copy(struct jb2_decoder *jb)
 {
 	struct bitmap *bm;
 	int s, x, y;
-	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->dist_match_index);
+	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->match_index);
 	bm = jb->symbol[s];
 	jb2_decode_rel_loc(jb, bm, &x, &y);
 	jb2_blit_bitmap(jb, bm, x, y);
 }
 
 static void
-jb2_decode_comment(struct jb2_decoder *jb)
+jb2_decode_non_symbol_data(struct jb2_decoder *jb)
 {
-	int len;
-	len = jb2_decode_num(jb, 0, BIGPOS, &jb->dist_comment_length);
-	while (len--)
-		jb2_decode_num(jb, 0, 255, &jb->dist_comment_byte);
+	struct bitmap *bm;
+	int x, y, w, h;
+	fprintf(stderr, "jb2: non-symbol-data\n");
+	w = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_x);
+	h = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_y);
+	bm = jb2_decode_bitmap_direct(jb, w, h);
+	x = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_x) - 1;
+	y = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_y) - 1;
+	jb2_blit_bitmap(jb, bm, x, y);
+	jb2_free_bitmap(bm);
 }
 
-static int
-jb2_decode_record(struct jb2_decoder *jb)
+static void
+jb2_decode_comment(struct jb2_decoder *jb)
 {
-	int rectype;
+	int n = jb2_decode_num(jb, 0, BIGPOS, &jb->comment_length);
+	while (n--)
+		jb2_decode_num(jb, 0, 255, &jb->comment_octet);
+}
 
-	rectype = jb2_decode_num(jb, START_OF_DATA, END_OF_DATA, &jb->dist_record_type);
-	printf("jb2: rectype=%d\n", rectype);
-
-	switch (rectype) {
-	case START_OF_DATA: jb2_decode_start_of_data(jb); break;
-	case NEW_SYMBOL: jb2_decode_new_symbol(jb, 1, 1); break;
-	case NEW_SYMBOL_LIBRARY_ONLY: jb2_decode_new_symbol(jb, 0, 1); break;
-	case NEW_SYMBOL_IMAGE_ONLY: jb2_decode_new_symbol(jb, 1, 0); break;
-	case MATCHED_REFINE: jb2_decode_matched_refine(jb, 1, 1); break;
-	case MATCHED_REFINE_LIBRARY_ONLY: jb2_decode_matched_refine(jb, 0, 1); break;
-	case MATCHED_REFINE_IMAGE_ONLY: jb2_decode_matched_refine(jb, 1, 0); break;
-	case MATCHED_COPY: jb2_decode_matched_copy(jb); break;
-//	case NON_SYMBOL_DATA: jb2_decode_symbol_data(jb); break;
-	case REQUIRED_DICT_OR_RESET: jb2_decode_dict_or_reset(jb); break;
-	case PRESERVED_COMMENT: jb2_decode_comment(jb); break;
-	case END_OF_DATA: printf("jb2: end-of-data\n"); return 1;
-	default: printf("jb2: unimplemented record type\n"); return 1;
+int
+jb2_decode(struct jb2_decoder *jb)
+{
+	int rec;
+	while (1) {
+		rec = jb2_decode_num(jb, 0, END_OF_DATA, &jb->record_type);
+		switch (rec) {
+		case START_OF_DATA:
+			jb2_decode_start_of_data(jb);
+			break;
+		case NEW_SYMBOL:
+			jb2_decode_new_symbol(jb, 1, 1);
+			break;
+		case NEW_SYMBOL_LIBRARY:
+			jb2_decode_new_symbol(jb, 0, 1);
+			break;
+		case NEW_SYMBOL_IMAGE:
+			jb2_decode_new_symbol(jb, 1, 0);
+			break;
+		case MATCHED_REFINE:
+			jb2_decode_matched_refine(jb, 1, 1);
+			break;
+		case MATCHED_REFINE_LIBRARY:
+			jb2_decode_matched_refine(jb, 0, 1);
+			break;
+		case MATCHED_REFINE_IMAGE:
+			jb2_decode_matched_refine(jb, 1, 0);
+			break;
+		case MATCHED_COPY:
+			jb2_decode_matched_copy(jb);
+			break;
+		case NON_SYMBOL_DATA:
+			jb2_decode_non_symbol_data(jb);
+			break;
+		case DICT_OR_RESET:
+			if (jb2_decode_dict_or_reset(jb))
+				return -1;
+			break;
+		case COMMENT:
+			jb2_decode_comment(jb);
+			break;
+		case END_OF_DATA:
+			return 0;
+		default:
+			fprintf(stderr, "jb2: unimplemented record type\n");
+			return -1;
+		}
 	}
-
-	return 0;
 }
 
 struct jb2_decoder *
@@ -587,27 +606,28 @@ jb2_new_decoder(unsigned char *src, int srclen, struct jb2_decoder *dict)
 
 	zp_init(&jb->zp, src, srclen);
 
-	jb->len = 20500;
-	jb->bit = malloc(jb->len);
-	jb->left = malloc(jb->len * sizeof(unsigned int));
-	jb->right = malloc(jb->len * sizeof(unsigned int));
+	jb->numcap = 20500;
+	jb->bit = malloc(jb->numcap);
+	jb->left = malloc(jb->numcap * sizeof(unsigned int));
+	jb->right = malloc(jb->numcap * sizeof(unsigned int));
 
 	jb2_reset_num_coder(jb);
 
-	jb->dist_refinement_flag = 0;
-	jb->offset_type_dist = 0;
+	jb->refinement_flag = 0;
+	jb->offset_type = 0;
 
 	memset(jb->direct, 0, sizeof jb->direct);
 	memset(jb->refine, 0, sizeof jb->refine);
 
 	jb->symlen = 0;
 	jb->symcap = 0;
+	jb->symshr = 0;
 	jb->symbol = NULL;
 
-	jb->line_left = 0;
-	jb->line_bottom = 0;
-	jb->prev_right = 0;
-	jb->prev_bottom = 0;
+	jb->new_left = 0;
+	jb->new_bottom = 0;
+	jb->same_right = 0;
+	jb->same_bottom = 0;
 	jb2_set_baseline(jb, 0);
 
 	jb->started = 0;
@@ -615,14 +635,6 @@ jb2_new_decoder(unsigned char *src, int srclen, struct jb2_decoder *dict)
 	jb->dict = dict;
 
 	return jb;
-}
-
-void
-jb2_decode(struct jb2_decoder *jb)
-{
-	while (1)
-		if (jb2_decode_record(jb))
-			break;
 }
 
 void
@@ -643,8 +655,8 @@ jb2_free_decoder(struct jb2_decoder *jb)
 	free(jb->left);
 	free(jb->right);
 
-//	for (i = 0; i < jb->symlen; i++)
-//		jb2_free_bitmap(jb->symbol[i]);
+	for (i = jb->symshr; i < jb->symlen; i++)
+		jb2_free_bitmap(jb->symbol[i]);
 	free(jb->symbol);
 
 	jb2_free_bitmap(jb->page);

@@ -14,7 +14,7 @@ int zp_decode_pass_through(struct zp_decoder *zp);
 unsigned char *bzz_decode(unsigned char *src, int srclen, int *outlen);
 
 struct jb2_decoder * jb2_new_decoder(unsigned char *src, int srclen, struct jb2_decoder *dict);
-void jb2_decode(struct jb2_decoder *jb);
+int jb2_decode(struct jb2_decoder *jb);
 void jb2_print_page(struct jb2_decoder *jb);
 void jb2_free_decoder(struct jb2_decoder *jb);
 
