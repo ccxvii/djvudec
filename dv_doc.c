@@ -2,6 +2,12 @@
 
 #define TAG(a,b,c,d) (a << 24 | b << 16 | c << 8 | d)
 
+struct dv_document
+{
+	FILE *file;
+	struct jb2library *lib;
+};
+
 void
 usage(void)
 {
@@ -183,20 +189,18 @@ void
 dv_parse_djbz(struct dv_document *doc, unsigned char *data, int size)
 {
 	printf("Djbz {\n");
-	doc->dict = jb2_new_decoder(data, size, NULL);
-	jb2_decode(doc->dict);
+	doc->lib = jb2_decode_library(data, size);
 	printf("}\n");
 }
 
 void
 dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
 {
-	struct jb2dec *jb;
+	struct jb2image *img;
 	printf("Sjbz {\n");
-	jb = jb2_new_decoder(data, size, doc->dict);
-	jb2_decode(jb);
-	jb2_print_page(jb);
-	jb2_free_decoder(jb);
+	img = jb2_decode_image(data, size, doc->lib);
+	jb2_write_pbm(img, "out.pbm");
+	jb2_free_image(img);
 	printf("}\n");
 exit(0);
 }
@@ -205,7 +209,7 @@ void
 dv_parse_iw44(struct dv_document *doc, unsigned char *data, int size)
 {
 	printf("BG44 {\n");
-	iw44_decode(data, size);
+	iw44_decode_image(data, size);
 	printf("}\n");
 exit(0);
 }
@@ -228,10 +232,10 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 		dv_parse_info(doc, data, len);
 	else if (tag == TAG('I','N','C','L'))
 		dv_parse_incl(doc, data, len);
-//	else if (tag == TAG('D','j','b','z'))
-//		dv_parse_djbz(doc, data, len);
-//	else if (tag == TAG('S','j','b','z'))
-//		dv_parse_sjbz(doc, data, len);
+	else if (tag == TAG('D','j','b','z'))
+		dv_parse_djbz(doc, data, len);
+	else if (tag == TAG('S','j','b','z'))
+		dv_parse_sjbz(doc, data, len);
 	else if (tag == TAG('B','G','4','4'))
 		dv_parse_iw44(doc, data, len);
 	else
@@ -285,7 +289,7 @@ dv_open_document(FILE *file)
 
 	doc = malloc(sizeof(struct dv_document));
 	doc->file = file;
-	doc->dict = NULL;
+	doc->lib = NULL;
 
 	dv_read_iff(doc);
 

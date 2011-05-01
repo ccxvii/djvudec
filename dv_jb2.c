@@ -74,8 +74,13 @@ struct jb2dec {
 
 	/* output page */
 	int started;
-	struct bitmap *page;
-	struct jb2dec *dict;
+	struct jb2image *page;
+	struct jb2library *lib;
+};
+
+struct jb2library {
+	int count;
+	struct bitmap **symbol;
 };
 
 static void
@@ -184,6 +189,25 @@ jb2_decode_num(struct jb2dec *jb, int low, int high, unsigned int *ctx)
 	return negative ? -cutoff - 1 : cutoff;
 }
 
+static struct jb2image *
+jb2_new_image(int w, int h)
+{
+	struct jb2image *img = malloc(sizeof(struct jb2image));
+	img->w = w;
+	img->h = h;
+	img->stride = (w + 7) >> 3;
+	img->data = malloc(h * img->stride);
+	memset(img->data, 0, h * img->stride);
+	return img;
+}
+
+void
+jb2_free_image(struct jb2image *img)
+{
+	free(img->data);
+	free(img);
+}
+
 static struct bitmap *
 jb2_new_bitmap(int w, int h)
 {
@@ -219,16 +243,20 @@ jb2_free_bitmap(struct bitmap *bm)
 }
 
 static void
-jb2_blit_bitmap(struct jb2dec *jb, struct bitmap *src, int dx, int dy)
+jb2_blit_bitmap(struct jb2image *dst, struct bitmap *src, int dx, int dy)
 {
+	unsigned char *line;
 	int x, y;
-	if (!jb->page)
+	if (!dst)
 		return;
+	line = dst->data + dy * dst->stride;
 	for (y = 0; y < src->h; y++) {
-		for (x = 0; x < src->w; x++) {
-			if (getbit(src, x, y))
-				setbit(jb->page, dx+x, dy+y, 0);
-		}
+		if (y + dy >= 0 && y + dy < dst->h)
+			for (x = 0; x < src->w; x++)
+				if (x + dx >= 0 && x + dx < dst->w)
+					if (getbit(src, x, y))
+						line[(dx+x)>>3] |= 1 << (7-((dx+x)&7));
+		line += dst->stride;
 	}
 }
 
@@ -457,10 +485,8 @@ jb2_decode_start_of_data(struct jb2dec *jb)
 	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
 	(void) zp_decode(&jb->zp, &jb->refinement_flag);
 	jb->started = 1;
-	if (w && h) {
-		jb->page = jb2_new_bitmap(w, h);
-		memset(jb->page->data, 255, w * h);
-	}
+	if (w && h)
+		jb->page = jb2_new_image(w, h);
 }
 
 static int
@@ -469,10 +495,10 @@ jb2_decode_dict_or_reset(struct jb2dec *jb)
 	if (!jb->started) {
 		int i, count;
 		count = jb2_decode_num(jb, 0, BIGPOS, &jb->inherited_shape_count);
-		if (!jb->dict || jb->dict->symlen < count || jb->symlen > 0)
+		if (!jb->lib || jb->lib->count < count || jb->symlen > 0)
 			return -1;
 		for (i = 0; i < count; i++)
-			jb2_add_to_library(jb, jb->dict->symbol[i]);
+			jb2_add_to_library(jb, jb->lib->symbol[i]);
 		jb->symshr = count;
 	} else {
 		jb2_reset_num_coder(jb);
@@ -490,7 +516,7 @@ jb2_decode_new_symbol(struct jb2dec *jb, int doimg, int dolib)
 	bm = jb2_decode_bitmap_direct(jb, w, h);
 	if (doimg) {
 		jb2_decode_rel_loc(jb, bm, &x, &y);
-		jb2_blit_bitmap(jb, bm, x, y);
+		jb2_blit_bitmap(jb->page, bm, x, y);
 	}
 	if (dolib)
 		jb2_add_to_library(jb, bm);
@@ -507,7 +533,7 @@ jb2_decode_matched_refine(struct jb2dec *jb, int doimg, int dolib)
 	bm = jb2_decode_bitmap_refine(jb, s, w, h);
 	if (doimg) {
 		jb2_decode_rel_loc(jb, bm, &x, &y);
-		jb2_blit_bitmap(jb, bm, x, y);
+		jb2_blit_bitmap(jb->page, bm, x, y);
 	}
 	if (dolib)
 		jb2_add_to_library(jb, bm);
@@ -521,7 +547,7 @@ jb2_decode_matched_copy(struct jb2dec *jb)
 	s = jb2_decode_num(jb, 0, jb->symlen - 1, &jb->match_index);
 	bm = jb->symbol[s];
 	jb2_decode_rel_loc(jb, bm, &x, &y);
-	jb2_blit_bitmap(jb, bm, x, y);
+	jb2_blit_bitmap(jb->page, bm, x, y);
 }
 
 static void
@@ -535,7 +561,7 @@ jb2_decode_non_symbol_data(struct jb2dec *jb)
 	bm = jb2_decode_bitmap_direct(jb, w, h);
 	x = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_x) - 1;
 	y = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_y) - 1;
-	jb2_blit_bitmap(jb, bm, x, y);
+	jb2_blit_bitmap(jb->page, bm, x, y);
 	jb2_free_bitmap(bm);
 }
 
@@ -547,7 +573,7 @@ jb2_decode_comment(struct jb2dec *jb)
 		jb2_decode_num(jb, 0, 255, &jb->comment_octet);
 }
 
-int
+static int
 jb2_decode(struct jb2dec *jb)
 {
 	int rec;
@@ -597,13 +623,9 @@ jb2_decode(struct jb2dec *jb)
 	}
 }
 
-struct jb2dec *
-jb2_new_decoder(unsigned char *src, int srclen, struct jb2dec *dict)
+static void
+jb2_init_decoder(struct jb2dec *jb, unsigned char *src, int srclen, struct jb2library *lib)
 {
-	struct jb2dec *jb;
-
-	jb = malloc(sizeof(struct jb2dec));
-
 	zp_init(&jb->zp, src, srclen);
 
 	jb->numcap = 20500;
@@ -632,21 +654,10 @@ jb2_new_decoder(unsigned char *src, int srclen, struct jb2dec *dict)
 
 	jb->started = 0;
 	jb->page = NULL;
-	jb->dict = dict;
-
-	return jb;
+	jb->lib = lib;
 }
 
-void
-jb2_print_page(struct jb2dec *jb)
-{
-	FILE *f = fopen("out.pgm", "wb");
-	fprintf(f, "P5\n%d %d\n255\n", jb->page->w, jb->page->h);
-	fwrite(jb->page->data, jb->page->w, jb->page->h, f);
-	fclose(f);
-}
-
-void
+static void
 jb2_free_decoder(struct jb2dec *jb)
 {
 	int i;
@@ -655,11 +666,65 @@ jb2_free_decoder(struct jb2dec *jb)
 	free(jb->left);
 	free(jb->right);
 
-	for (i = jb->symshr; i < jb->symlen; i++)
-		jb2_free_bitmap(jb->symbol[i]);
-	free(jb->symbol);
+	if (jb->symbol) {
+		for (i = jb->symshr; i < jb->symlen; i++)
+			jb2_free_bitmap(jb->symbol[i]);
+		free(jb->symbol);
+	}
 
-	jb2_free_bitmap(jb->page);
+	if (jb->page)
+		jb2_free_image(jb->page);
+}
 
-	free(jb);
+struct jb2library *
+jb2_decode_library(unsigned char *src, int srclen)
+{
+	struct jb2dec jbx, *jb = &jbx;
+	struct jb2library *lib;
+	int error;
+
+	jb2_init_decoder(jb, src, srclen, NULL);
+	error = jb2_decode(jb);
+	if (error) {
+		jb2_free_decoder(jb);
+		return NULL;
+	}
+
+	lib = malloc(sizeof(struct jb2library));
+	lib->count = jb->symlen;
+	lib->symbol = jb->symbol;
+
+	jb->symbol = NULL;
+	jb2_free_decoder(jb);
+	return lib;
+}
+
+struct jb2image *
+jb2_decode_image(unsigned char *src, int srclen, struct jb2library *lib)
+{
+	struct jb2dec jbx, *jb = &jbx;
+	struct jb2image *img;
+	int error;
+
+	jb2_init_decoder(jb, src, srclen, NULL);
+	error = jb2_decode(jb);
+	if (error) {
+		jb2_free_decoder(jb);
+		return NULL;
+	}
+
+	img = jb->page;
+
+	jb->page = NULL;
+	jb2_free_decoder(jb);
+	return img;
+}
+
+void
+jb2_write_pbm(struct jb2image *page, char *filename)
+{
+	FILE *f = fopen(filename, "wb");
+	fprintf(f, "P4\n%d %d\n", page->w, page->h);
+	fwrite(page->data, page->stride, page->h, f);
+	fclose(f);
 }
