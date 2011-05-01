@@ -235,7 +235,28 @@ void
 dv_parse_iw44(struct dv_document *doc, unsigned char *data, int size)
 {
 	printf("BG44 {\n");
-	iw44_decode_image(data, size);
+	int serial, slices;
+
+	serial = data[0];
+	slices = data[1];
+	printf("serial = %d\n", serial);
+	printf("slices = %d\n", slices);
+
+	if (serial == 0)
+	{
+		int comps = data[2] >> 7;
+		int version = get16(data + 2) & 0x7fff;
+		int width = get16(data + 4);
+		int height = get16(data + 6);
+		int crdelay = data[8];
+
+		printf("comps = %d\n", comps);
+		printf("version = 0x%04x\n", version);
+		printf("width = %d\n", width);
+		printf("height = %d\n", height);
+		printf("crdelay = %d\n", crdelay);
+	}
+	//iw44_decode_image(data, size);
 	printf("}\n");
 exit(0);
 }
