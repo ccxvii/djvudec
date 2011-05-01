@@ -202,7 +202,33 @@ dv_parse_sjbz(struct dv_document *doc, unsigned char *data, int size)
 	jb2_write_pbm(img, "out.pbm");
 	jb2_free_image(img);
 	printf("}\n");
-exit(0);
+}
+
+void
+dv_parse_fgbz(struct dv_document *doc, unsigned char *data, int size)
+{
+	int hascorr;
+	int colors, i;
+
+	hascorr = data[0] >> 7;
+	colors = get16(data + 1);
+
+	printf("palette (%d) {\n", colors);
+	for (i = 0; i < colors; i++)
+		printf("\t0x%06x\n", get24(data + 3 + i * 3));
+	printf("}\n");
+
+	if (hascorr)
+	{
+		int datasize;
+		unsigned char *sdata = data + 3 + colors * 3;
+
+		datasize = get24(sdata);
+		printf("correspondence (%d) {\n", datasize);
+		for (i = 0; i < datasize; i++)
+			printf("\t0x%06x\n", get24(sdata + 3 + i * 16));
+		printf("}\n");
+	}
 }
 
 void
@@ -238,6 +264,8 @@ dv_read_chunk(struct dv_document *doc, unsigned int tag, int len)
 		dv_parse_sjbz(doc, data, len);
 	else if (tag == TAG('B','G','4','4'))
 		dv_parse_iw44(doc, data, len);
+        else if (tag == TAG('F','G','b','z'))
+                dv_parse_fgbz(doc, data, len);
 	else
 		printf("tag %c%c%c%c\n", tag>>24, tag>>16, tag>>8, tag);
 	free(data);
