@@ -25,16 +25,12 @@ $(OUT)/%.o : %.c mudjvu.h | $(OUT)
 	$(CC_CMD)
 
 AOUT := $(OUT)/a.out
-BOUT := $(OUT)/b.out
-ASRC := dv_doc.c dv_bzz.c dv_jb2.c dv_zp.c
-BSRC := dv_doc.c dv_bzz.c dv_jb2.c dv_zp_old.c
+SRC := dv_doc.c dv_bzz.c dv_jb2.c dv_zp.c
 
-$(AOUT) : $(addprefix $(OUT)/, $(ASRC:%.c=%.o))
-	$(LINK_CMD)
-$(BOUT) : $(addprefix $(OUT)/, $(BSRC:%.c=%.o))
+$(AOUT) : $(addprefix $(OUT)/, $(SRC:%.c=%.o))
 	$(LINK_CMD)
 
-all: $(AOUT) $(BOUT)
+all: $(AOUT)
 
 clean:
 	rm $(OUT)/*

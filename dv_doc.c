@@ -60,16 +60,6 @@ static int read16(FILE *f)
 	return x;
 }
 
-static int pad16(int n)
-{
-	return (n + 1) & ~1;
-}
-
-static int pad32(int n)
-{
-	return (n + 3) & ~3;
-}
-
 static int get32(unsigned char *p)
 {
 	return p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
@@ -89,7 +79,6 @@ void
 dv_parse_dirm(struct dv_document *doc, unsigned char *cdata, int csize)
 {
 	int flags, count, offset, size, flag, i;
-	int hasname, hastitle;
 	unsigned char *udata;
 	int usize;
 
@@ -117,9 +106,9 @@ dv_parse_dirm(struct dv_document *doc, unsigned char *cdata, int csize)
 		size = get24(udata + i * 3);
 		flag = udata[count * 3 + i];
 		printf("chunk %d: size=%d flag=%x name='%s'\n", i, size, flag, udata + offset);
-		offset += strlen(udata + offset) + 1;
-		if (flag & 0x80) offset += strlen(udata + offset) + 1;
-		if (flag & 0x40) offset += strlen(udata + offset) + 1;
+		offset += strlen((char*)udata + offset) + 1;
+		if (flag & 0x80) offset += strlen((char*)udata + offset) + 1;
+		if (flag & 0x40) offset += strlen((char*)udata + offset) + 1;
 	}
 
 	free(udata);
@@ -253,7 +242,7 @@ dv_read_form(struct dv_document *doc, int tag, int form_len)
 		} else {
 			dv_read_chunk(doc, tag, len);
 		}
-		ofs += 8 + pad16(len);
+		ofs += 8 + (len & 1);
 	}
 	printf("}\n");
 	return 0;
