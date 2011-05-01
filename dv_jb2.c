@@ -706,7 +706,7 @@ jb2_decode_image(unsigned char *src, int srclen, struct jb2library *lib)
 	struct jb2image *img;
 	int error;
 
-	jb2_init_decoder(jb, src, srclen, NULL);
+	jb2_init_decoder(jb, src, srclen, lib);
 	error = jb2_decode(jb);
 	if (error) {
 		jb2_free_decoder(jb);
