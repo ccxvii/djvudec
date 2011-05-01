@@ -21,7 +21,7 @@ MKDIR_CMD = $(QUIET_MKDIR) mkdir -p $@
 $(OUT) :
 	$(MKDIR_CMD)
 
-$(OUT)/%.o : %.c mudjvu.h | $(OUT)
+$(OUT)/%.o : %.c djvudec.h | $(OUT)
 	$(CC_CMD)
 
 AOUT := $(OUT)/a.out

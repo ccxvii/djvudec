@@ -1,4 +1,4 @@
-#include "mudjvu.h"
+#include "djvudec.h"
 
 /*
 	The Z'-Coder is an approximate adaptive binary arithmetic coder.

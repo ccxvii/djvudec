@@ -1,4 +1,4 @@
-#include "mudjvu.h"
+#include "djvudec.h"
 
 enum {
 	BIGPOS = 262142,

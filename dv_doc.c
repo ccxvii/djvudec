@@ -1,4 +1,4 @@
-#include "mudjvu.h"
+#include "djvudec.h"
 
 #define TAG(a,b,c,d) (a << 24 | b << 16 | c << 8 | d)
 

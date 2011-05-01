@@ -1,4 +1,4 @@
-#include "mudjvu.h"
+#include "djvudec.h"
 
 static unsigned int
 bzz_decode_raw(struct zp_decoder *zp, int b)
