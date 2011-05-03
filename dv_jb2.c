@@ -73,7 +73,7 @@ struct jb2dec {
 	unsigned char refine[2048];
 
 	/* output page */
-	int started;
+	int started, w, h;
 	struct jb2image *page;
 	struct jb2library *lib;
 };
@@ -474,7 +474,7 @@ jb2_decode_rel_loc(struct jb2dec *jb, struct bitmap *bm, int *xp, int *yp)
 		jb->same_right = right;
 		jb->same_bottom = jb2_update_baseline(jb, bottom);
 	}
-	*xp = left;
+	*xp = left - 1;
 	*yp = top;
 }
 
@@ -484,9 +484,12 @@ jb2_decode_start_of_data(struct jb2dec *jb)
 	int w = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
 	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
 	(void) zp_decode(&jb->zp, &jb->refinement_flag);
-	jb->started = 1;
-	if (w && h)
+	if (w && h && !jb->started) {
 		jb->page = jb2_new_image(w, h);
+		jb->w = w;
+		jb->h = h;
+	}
+	jb->started = 1;
 }
 
 static int
@@ -555,13 +558,12 @@ jb2_decode_non_symbol_data(struct jb2dec *jb)
 {
 	struct bitmap *bm;
 	int x, y, w, h;
-	fprintf(stderr, "jb2: non-symbol-data\n");
 	w = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_x);
 	h = jb2_decode_num(jb, 0, BIGPOS, &jb->abs_size_y);
 	bm = jb2_decode_bitmap_direct(jb, w, h);
-	x = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_x) - 1;
-	y = jb2_decode_num(jb, 1, BIGPOS, &jb->abs_loc_y) - 1;
-	jb2_blit_bitmap(jb->page, bm, x, y);
+	x = jb2_decode_num(jb, 1, jb->w, &jb->abs_loc_x) - 1;
+	y = jb2_decode_num(jb, 1, jb->h, &jb->abs_loc_y);
+	jb2_blit_bitmap(jb->page, bm, x, jb->h - y);
 	jb2_free_bitmap(bm);
 }
 
@@ -653,6 +655,7 @@ jb2_init_decoder(struct jb2dec *jb, unsigned char *src, int srclen, struct jb2li
 	jb2_set_baseline(jb, 0);
 
 	jb->started = 0;
+	jb->w = jb->h = 0;
 	jb->page = NULL;
 	jb->lib = lib;
 }

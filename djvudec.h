@@ -19,6 +19,7 @@ unsigned char *bzz_decode(unsigned char *src, int srclen, int *outlen);
 
 /* JB2 bi-level image decoder */
 
+/* should be a list of blits instead */
 struct jb2image {
 	int w, h, stride;
 	unsigned char *data;
