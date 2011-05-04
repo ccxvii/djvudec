@@ -28,12 +28,26 @@ struct bitmap {
 	unsigned char *orig;
 };
 
+struct jb2library {
+	int count;
+	struct bitmap **symbol;
+};
+
+struct jb2palette {
+	int color_count, index_count;
+	unsigned char *color;
+	unsigned short *index;
+};
+
 struct jb2dec {
 	struct zpdec zp;
 
 	/* symbol library */
-	int symlen, symcap, symshr;
+	int symshr, symlen, symcap;
 	struct bitmap **symbol;
+
+	struct jb2library *lib;
+	struct jb2palette *pal;
 
 	/* relative locations */
 	int new_left, new_bottom;
@@ -75,12 +89,6 @@ struct jb2dec {
 	/* output page */
 	int started, w, h;
 	struct djvu_bitmap *page;
-	struct jb2library *lib;
-};
-
-struct jb2library {
-	int count;
-	struct bitmap **symbol;
 };
 
 static void
@@ -607,9 +615,17 @@ jb2_decode(struct jb2dec *jb)
 }
 
 static void
-jb2_init_decoder(struct jb2dec *jb, unsigned char *src, int srclen, struct jb2library *lib)
+jb2_init_decoder(struct jb2dec *jb, unsigned char *src, int srclen, struct jb2library *lib, struct jb2palette *pal)
 {
 	zp_init(&jb->zp, src, srclen);
+
+	jb->symlen = 0;
+	jb->symcap = 0;
+	jb->symshr = 0;
+	jb->symbol = NULL;
+
+	jb->lib = lib;
+	jb->pal = pal;
 
 	jb->numcap = 20500;
 	jb->bit = malloc(jb->numcap);
@@ -623,11 +639,6 @@ jb2_init_decoder(struct jb2dec *jb, unsigned char *src, int srclen, struct jb2li
 
 	memset(jb->direct, 0, sizeof jb->direct);
 	memset(jb->refine, 0, sizeof jb->refine);
-
-	jb->symlen = 0;
-	jb->symcap = 0;
-	jb->symshr = 0;
-	jb->symbol = NULL;
 
 	jb->new_left = 0;
 	jb->new_bottom = 0;
@@ -667,7 +678,7 @@ jb2_decode_library(unsigned char *src, int srclen)
 	struct jb2library *lib;
 	int error;
 
-	jb2_init_decoder(jb, src, srclen, NULL);
+	jb2_init_decoder(jb, src, srclen, NULL, NULL);
 	error = jb2_decode(jb);
 	if (error) {
 		jb2_free_decoder(jb);
@@ -677,8 +688,8 @@ jb2_decode_library(unsigned char *src, int srclen)
 	lib = malloc(sizeof(struct jb2library));
 	lib->count = jb->symlen;
 	lib->symbol = jb->symbol;
-
 	jb->symbol = NULL;
+
 	jb2_free_decoder(jb);
 	return lib;
 }
@@ -690,7 +701,7 @@ jb2_decode_bitmap(unsigned char *src, int srclen, struct jb2library *lib)
 	struct djvu_bitmap *img;
 	int error;
 
-	jb2_init_decoder(jb, src, srclen, lib);
+	jb2_init_decoder(jb, src, srclen, lib, NULL);
 	error = jb2_decode(jb);
 	if (error) {
 		jb2_free_decoder(jb);
@@ -702,4 +713,55 @@ jb2_decode_bitmap(unsigned char *src, int srclen, struct jb2library *lib)
 	jb->page = NULL;
 	jb2_free_decoder(jb);
 	return img;
+}
+
+struct jb2palette *
+jb2_decode_palette(unsigned char *data, int len)
+{
+	struct jb2palette *pal;
+	unsigned char *udata;
+	int ulen;
+	int version;
+	int color_count;
+	int index_count;
+	int ofs, i;
+
+	if (len < 3)
+		return NULL;
+
+	version = data[0];
+	color_count = data[1] << 8 | data[2];
+
+	if (len < 3 + 3 * color_count)
+		return NULL;
+
+	pal = malloc(sizeof(struct jb2palette));
+	pal->color_count = color_count;
+	pal->color = malloc(color_count * 3);
+	for (i = 0; i < color_count; i++) {
+		pal->color[i*3+0] = data[3+i*3+2];
+		pal->color[i*3+1] = data[3+i*3+1];
+		pal->color[i*3+2] = data[3+i*3+0];
+	}
+
+	pal->index_count = 0;
+	pal->index = NULL;
+
+	if (version >> 7 || len < 6 + color_count * 3)
+		return pal;
+
+	ofs = 3 + color_count * 3;
+	index_count = data[ofs] << 16 | data[ofs+1] << 8 | data[ofs+2];
+	udata = bzz_decode(data + ofs + 3, len - ofs - 3, &ulen);
+	if (ulen < index_count * 2)
+		return pal;
+
+	pal->index_count = index_count;
+	pal->index = malloc(index_count * sizeof(unsigned short));
+	for (i = 0; i < index_count; i++)
+		pal->index[i] = udata[i * 2] << 8 | udata[i * 2 + 1];
+
+	free(udata);
+
+	return pal;
 }
