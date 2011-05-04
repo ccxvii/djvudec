@@ -13,7 +13,7 @@ struct page {
 	int chunk;
 	int w, h, dpi, gamma, rotate;
 	struct jb2library *lib;
-	struct jb2image *mask;
+	struct djvu_bitmap *mask;
 };
 
 struct djvu {
@@ -157,7 +157,7 @@ static int djvu_read_chunk(struct djvu *doc, int page);
 int
 djvu_read_incl(struct djvu *doc, int page, unsigned char *data, int size)
 {
-	unsigned int save, tag, len;
+	unsigned int save;
 	int error, i, n;
 
 	for (i = 0; i < doc->chunk_count; i++) {
@@ -198,9 +198,9 @@ djvu_read_sjbz(struct djvu *doc, int pagenum, unsigned char *data, int size)
 	struct page *page = doc->page + pagenum;
 	char name[30];
 	printf("loading Sjbz chunk\n");
-	page->mask = jb2_decode_image(data, size, page->lib);
+	page->mask = jb2_decode_bitmap(data, size, page->lib);
 	sprintf(name, "page%03d_mask.pbm", pagenum + 1);
-	jb2_write_pbm(page->mask, name);
+	djvu_write_bitmap(page->mask, name);
 	return 0;
 }
 
@@ -208,7 +208,6 @@ static int
 djvu_read_info(struct djvu *doc, int pagenum, unsigned char *data, int len)
 {
 	struct page *page = doc->page + pagenum;
-	int maj, min;
 
 	if (len < 4)
 		return fz_throw("bad INFO chunk size");

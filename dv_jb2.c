@@ -74,7 +74,7 @@ struct jb2dec {
 
 	/* output page */
 	int started, w, h;
-	struct jb2image *page;
+	struct djvu_bitmap *page;
 	struct jb2library *lib;
 };
 
@@ -189,25 +189,6 @@ jb2_decode_num(struct jb2dec *jb, int low, int high, unsigned int *ctx)
 	return negative ? -cutoff - 1 : cutoff;
 }
 
-static struct jb2image *
-jb2_new_image(int w, int h)
-{
-	struct jb2image *img = malloc(sizeof(struct jb2image));
-	img->w = w;
-	img->h = h;
-	img->stride = (w + 7) >> 3;
-	img->data = malloc(h * img->stride);
-	memset(img->data, 0, h * img->stride);
-	return img;
-}
-
-void
-jb2_free_image(struct jb2image *img)
-{
-	free(img->data);
-	free(img);
-}
-
 static struct bitmap *
 jb2_new_bitmap(int w, int h)
 {
@@ -243,7 +224,7 @@ jb2_free_bitmap(struct bitmap *bm)
 }
 
 static void
-jb2_blit_bitmap(struct jb2image *dst, struct bitmap *src, int dx, int dy)
+jb2_blit_bitmap(struct djvu_bitmap *dst, struct bitmap *src, int dx, int dy)
 {
 	unsigned char *line;
 	int x, y;
@@ -485,7 +466,7 @@ jb2_decode_start_of_data(struct jb2dec *jb)
 	int h = jb2_decode_num(jb, 0, BIGPOS, &jb->image_size);
 	(void) zp_decode(&jb->zp, &jb->refinement_flag);
 	if (w && h && !jb->started) {
-		jb->page = jb2_new_image(w, h);
+		jb->page = djvu_new_bitmap(w, h);
 		jb->w = w;
 		jb->h = h;
 	}
@@ -676,7 +657,7 @@ jb2_free_decoder(struct jb2dec *jb)
 	}
 
 	if (jb->page)
-		jb2_free_image(jb->page);
+		djvu_free_bitmap(jb->page);
 }
 
 struct jb2library *
@@ -702,11 +683,11 @@ jb2_decode_library(unsigned char *src, int srclen)
 	return lib;
 }
 
-struct jb2image *
-jb2_decode_image(unsigned char *src, int srclen, struct jb2library *lib)
+struct djvu_bitmap *
+jb2_decode_bitmap(unsigned char *src, int srclen, struct jb2library *lib)
 {
 	struct jb2dec jbx, *jb = &jbx;
-	struct jb2image *img;
+	struct djvu_bitmap *img;
 	int error;
 
 	jb2_init_decoder(jb, src, srclen, lib);
@@ -721,13 +702,4 @@ jb2_decode_image(unsigned char *src, int srclen, struct jb2library *lib)
 	jb->page = NULL;
 	jb2_free_decoder(jb);
 	return img;
-}
-
-void
-jb2_write_pbm(struct jb2image *page, char *filename)
-{
-	FILE *f = fopen(filename, "wb");
-	fprintf(f, "P4\n%d %d\n", page->w, page->h);
-	fwrite(page->data, page->stride, page->h, f);
-	fclose(f);
 }
