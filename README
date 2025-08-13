@@ -1,7 +1,0 @@
-DjVuDec
-
-Copyright (c) 2011 Tor Andersson.
-
-DjVuDec is a decoder library for the DjVu image compression format.
-This implementation is written in ANSI C, with a focus on simplicity
-and small code size.
